@@ -88,7 +88,7 @@ Időformátum: `m:ss`, egy óra fölött `h:mm:ss`, tabuláris számjegyek.
 - Halvány sáv mindig látszik (#888780, 20%).
 - Timer, cél-stopper, pomodoro: telik az aktuális szakasz arányában, szín: #1D9E75.
 - Cél-stopper túlórában: teli kör, rajta korall (#D85A30) ív kezdi elölről felülírni.
-- Stopper: egy rövid szakasz (a kerület ~7%-a), ami óránként egyet fordul (az órán belüli pozíciót mutatja).
+- Stopper: egy rövid szakasz (a kerület ~7%-a), ami percenként egyet fordul, folyamatos mozgással (a percen belüli pozíciót mutatja).
 - Pomodoro szünet: lassan körbe váltó színek (hsl, ~4 mp alatt egy teljes kör).
 - Paused: szolid #888780, mozdulatlan.
 - Alarm: teli korall kör, halvány alapfényerő, és a brrr-rel szinkronban lassan felpulzál (ALARM_CYCLE 3400 ms, a ciklus 65%-ától).

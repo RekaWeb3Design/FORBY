@@ -15,7 +15,7 @@ const OVER_COLOR = "#D85A30";
 const PAUSED_COLOR = "#888780";
 
 const STOPWATCH_SEGMENT = 0.07; // share of the circumference
-const HOUR_MS = 3_600_000;
+const STOPWATCH_LAP_MS = 60_000; // one turn per minute, moving continuously
 const BREAK_HUE_CYCLE_MS = 4000;
 const BREAK_SATURATION = 60;
 const BREAK_LIGHTNESS = 50;
@@ -46,7 +46,7 @@ const arcsFor = (ui: Ui, s: Session | null, t: number, now: number): Arc[] => {
   if (ui === "summary") {
     if (s.mode === "pomodoro") return [arc(PROGRESS_COLOR, 0, 1)];
     if (s.mode === "stopwatch") {
-      const p = (snap.elapsedMs % HOUR_MS) / HOUR_MS;
+      const p = (snap.elapsedMs % STOPWATCH_LAP_MS) / STOPWATCH_LAP_MS;
       return [arc(PROGRESS_COLOR, p - STOPWATCH_SEGMENT, p)];
     }
     if (snap.elapsedMs <= s.targetMs) return [arc(PROGRESS_COLOR, 0, clamp01(snap.elapsedMs / s.targetMs))];
@@ -56,7 +56,7 @@ const arcsFor = (ui: Ui, s: Session | null, t: number, now: number): Arc[] => {
 
   switch (s.mode) {
     case "stopwatch": {
-      const p = (snap.elapsedMs % HOUR_MS) / HOUR_MS;
+      const p = (snap.elapsedMs % STOPWATCH_LAP_MS) / STOPWATCH_LAP_MS;
       return [arc(tint(PROGRESS_COLOR), p - STOPWATCH_SEGMENT, p)];
     }
     case "timer":
