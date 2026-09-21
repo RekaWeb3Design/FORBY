@@ -2,6 +2,7 @@ import {useCallback, useRef} from "react";
 import {getCurrentWindow} from "@tauri-apps/api/window";
 import Chips from "./Chips";
 import Face from "./Face";
+import Ring from "./Ring";
 import TimeText from "./TimeText";
 import {createMotion} from "./motion";
 import {PLAY_MODE, READING_ANIMATION} from "./settings";
@@ -46,6 +47,7 @@ function App() {
   return (
     <main className="shell">
       <Chips chips={view.chips} cx={ORB_CX} cy={ORB_CY} radius={CHIP_ARC_R} onPick={pickChip} />
+      <Ring ui={state.ui} session={state.session} left={ORB_CX - ORB_R} top={ORB_CY - ORB_R} size={ORB_R * 2} />
       <div
         className="orb"
         ref={orbRef}

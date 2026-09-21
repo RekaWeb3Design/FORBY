@@ -29,14 +29,14 @@ type Feature = {
 };
 
 // Timing (ms)
-const FRAME_MS = 1000 / 30;
+export const FRAME_MS = 1000 / 30;
 const POLL_MS = 50;
 const BLINK_MIN = 2500;
 const BLINK_RAND = 4000;
 const SLOW_BLINK_MIN = 15000;
 const SLOW_BLINK_RAND = 10000;
-const ALARM_CYCLE = 3400;
-const ALARM_BRR_FROM = 0.65;
+export const ALARM_CYCLE = 3400;
+export const ALARM_BRR_FROM = 0.65;
 const OVERTIME_CYCLE = 20000;
 const READ_CYCLE = 4200;
 
