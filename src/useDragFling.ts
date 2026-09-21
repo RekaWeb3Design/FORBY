@@ -1,5 +1,6 @@
 import {useEffect, useRef, type RefObject} from "react";
 import {availableMonitors, cursorPosition, getCurrentWindow, PhysicalPosition} from "@tauri-apps/api/window";
+import {orbLimits, type Area} from "./bounds";
 import type {Motion} from "./motion";
 
 // Click vs drag
@@ -14,10 +15,9 @@ const FRICTION = 0.9965; // v *= FRICTION^dt (dt in ms)
 const STOP_SPEED = 0.015; // logical px/ms
 const MAX_STEP_MS = 40;
 
-// Bounds, applied to the orb's circle (not the window)
+// Bounds, applied to the orb's circle (not the window); overhang is in bounds.ts
 const BOUNCE_X = 0.55;
 const BOUNCE_Y = 0.45;
-const OVERHANG = 0.05; // max share of the monitor height the orb may stick out
 const SPRING_K = 0.00012; // per ms², pulls the orb fully back on screen
 const SPRING_DAMPING = 0.994; // per ms, extra damping while outside
 const SETTLE_PX = 0.5; // logical px
@@ -28,25 +28,28 @@ const IMPACT_FULL_SPEED = 2.5;
 
 const MONITOR_REFRESH_MS = 1000;
 
-type Area = {left: number; top: number; right: number; bottom: number};
 type Sample = {t: number; x: number; y: number};
 type Mode = "idle" | "press" | "drag" | "fling";
 
 const clamp = (v: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, v));
 
-const distToArea = (a: Area, x: number, y: number) =>
-  Math.hypot(Math.max(a.left - x, 0, x - a.right), Math.max(a.top - y, 0, y - a.bottom));
+type Options = {
+  // Play mode: fling with bounces, overhang and spring, and motion data for the face.
+  // Off: plain drag that stays where released, fully inside the work area, no motion reactions.
+  playMode: boolean;
+  onClick?: () => void;
+};
 
 // Own window dragging and throwing. Everything is computed in physical pixels on the orb's centre.
 // Returns a ref that is true while the orb is pressed, dragged or flying.
 export const useDragFling = (
   orbRef: RefObject<HTMLElement | null>,
   motion: RefObject<Motion>,
-  onClick?: () => void,
+  {playMode, onClick}: Options,
 ) => {
   const activeRef = useRef(false);
-  const onClickRef = useRef(onClick);
-  onClickRef.current = onClick;
+  const optsRef = useRef({playMode, onClick});
+  optsRef.current = {playMode, onClick};
 
   useEffect(() => {
     const orb = orbRef.current;
@@ -96,24 +99,8 @@ export const useDragFling = (
       return {ox: r.left + r.width / 2, oy: r.top + r.height / 2, r: r.width / 2};
     };
 
-    // Limits for the orb centre: horizontal walls span all monitors, vertical ones come from the monitor under the centre
-    const limits = (x: number, y: number, r: number) => {
-      if (!areas.length) return null;
-      const left = Math.min(...areas.map((a) => a.left));
-      const right = Math.max(...areas.map((a) => a.right));
-      const inColumn = areas.filter((a) => x >= a.left && x < a.right);
-      const pool = inColumn.length ? inColumn : areas;
-      const area = pool.reduce((best, a) => (distToArea(a, x, y) < distToArea(best, x, y) ? a : best));
-      const over = (area.bottom - area.top) * OVERHANG;
-      return {
-        minX: left + r,
-        maxX: right - r,
-        hardMinY: area.top - over + r,
-        hardMaxY: area.bottom + over - r,
-        softMinY: area.top + r,
-        softMaxY: area.bottom - r,
-      };
-    };
+    const play = () => optsRef.current.playMode;
+    const limits = (x: number, y: number, r: number) => orbLimits(areas, x, y, r, play());
 
     // Latest-wins window positioning: never more than one setPosition in flight
     let pending: {x: number; y: number} | null = null;
@@ -139,7 +126,7 @@ export const useDragFling = (
 
     const impact = (dirX: number, dirY: number, speedPhys: number) => {
       const speed = speedPhys / scale;
-      if (speed < IMPACT_MIN_SPEED) return;
+      if (!play() || speed < IMPACT_MIN_SPEED) return;
       m.impactAt = performance.now();
       m.impactX = dirX;
       m.impactY = dirY;
@@ -207,16 +194,16 @@ export const useDragFling = (
             const v = sampleVelocity();
             if (x < lim.minX && cx >= lim.minX) impact(-1, 0, -v.x);
             if (x > lim.maxX && cx <= lim.maxX) impact(1, 0, v.x);
-            if (y < lim.hardMinY && cy >= lim.hardMinY) impact(0, -1, -v.y);
-            if (y > lim.hardMaxY && cy <= lim.hardMaxY) impact(0, 1, v.y);
+            if (y < lim.minY && cy >= lim.minY) impact(0, -1, -v.y);
+            if (y > lim.maxY && cy <= lim.maxY) impact(0, 1, v.y);
             x = clamp(x, lim.minX, lim.maxX);
-            y = clamp(y, lim.hardMinY, lim.hardMaxY);
+            y = clamp(y, lim.minY, lim.maxY);
           }
           cx = x;
           cy = y;
           samples.push({t, x, y});
           samples = samples.filter((s) => s.t >= t - SAMPLE_WINDOW_MS);
-          const v = sampleVelocity();
+          const v = play() ? sampleVelocity() : {x: 0, y: 0};
           m.vx = v.x / scale;
           m.vy = v.y / scale;
           moveTo(cx, cy);
@@ -227,10 +214,21 @@ export const useDragFling = (
 
     // Fling: momentum with friction, walls, and a spring back onto the screen
     const flingFrame = (t: number) => {
+      const r = orbGeom().r * scale;
+      // Play mode switched off mid-flight: stop right here, fully on screen
+      if (!play()) {
+        const lim = limits(cx, cy, r);
+        if (lim) {
+          cx = clamp(cx, lim.minX, lim.maxX);
+          cy = clamp(cy, lim.minY, lim.maxY);
+        }
+        moveTo(cx, cy);
+        settle();
+        return;
+      }
       const dt = Math.min(MAX_STEP_MS, t - last);
       last = t;
       if (dt <= 0) return;
-      const r = orbGeom().r * scale;
       const decay = Math.pow(FRICTION, dt);
       vx *= decay;
       vy *= decay;
@@ -247,11 +245,11 @@ export const useDragFling = (
           cx = lim.maxX;
           if (vx > 0) {impact(1, 0, vx); vx = -vx * BOUNCE_X;}
         }
-        if (cy < lim.hardMinY) {
-          cy = lim.hardMinY;
+        if (cy < lim.minY) {
+          cy = lim.minY;
           if (vy < 0) {impact(0, -1, -vy); vy = -vy * BOUNCE_Y;}
-        } else if (cy > lim.hardMaxY) {
-          cy = lim.hardMaxY;
+        } else if (cy > lim.maxY) {
+          cy = lim.maxY;
           if (vy > 0) {impact(0, 1, vy); vy = -vy * BOUNCE_Y;}
         }
         if (cy < lim.softMinY) off = lim.softMinY - cy;
@@ -321,10 +319,11 @@ export const useDragFling = (
         settle();
         if (e.type === "pointerup") {
           m.tapAt = performance.now();
-          onClickRef.current?.();
+          optsRef.current.onClick?.();
         }
       } else if (mode === "drag") {
-        if (Number.isNaN(cx)) settle();
+        // Without play mode the orb simply stays where it was released
+        if (Number.isNaN(cx) || !play()) settle();
         else startFling();
       }
     };

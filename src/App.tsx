@@ -2,6 +2,7 @@ import {useCallback, useEffect, useRef, useState} from "react";
 import {getCurrentWindow} from "@tauri-apps/api/window";
 import Face, {type FaceState} from "./Face";
 import {createMotion} from "./motion";
+import {PLAY_MODE} from "./settings";
 import {useDragFling} from "./useDragFling";
 import "./App.css";
 
@@ -29,7 +30,7 @@ function App() {
   const [state, setState] = useState<FaceState>("idle");
   const orbRef = useRef<HTMLDivElement>(null);
   const motion = useRef(createMotion());
-  const activeRef = useDragFling(orbRef, motion);
+  const activeRef = useDragFling(orbRef, motion, {playMode: PLAY_MODE});
   const ignoreRef = useRef<boolean | null>(null);
 
   useEffect(() => {

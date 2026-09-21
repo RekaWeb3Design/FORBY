@@ -35,6 +35,12 @@ Ez a dokumentum a jóváhagyott prototípusok alapján készült. Ami itt szerep
   - Falnak ütközéskor rövid összenyomódás az ütközés irányában (~240 ms).
   - Kattintáskor „koppintás”: rövid összenyomódás és visszapattanás (~320 ms).
 
+### Játék mód
+
+- A dobás-fizika (lendület, pattogás, 5%-os kilógás és rugó), valamint az arc-reakciók közül a lemaradás, a nyúlás, a whoa és az ütközési lapulás a **Játék mód** része. Alapból be van kapcsolva (beállítás: „Megjelenés és időzítés” fül).
+- Kikapcsolt Játék módban: sima húzás, elengedéskor ott marad, ahol van, lendület nélkül; a gömb nem lóghat ki a monitor munkaterületéről; nincs lemaradás, nyúlás, whoa, ütközési lapulás.
+- A koppintás-reakció és a kurzorkövető szem mindkét módban megmarad.
+
 ## Módok és állapotgép
 
 UI-állapotok: `idle`, `pickMode`, `pickDur`, `run`, `paused`, `alarm`, `summary`.
@@ -91,7 +97,7 @@ Időformátum: `m:ss`, egy óra fölött `h:mm:ss`, tabuláris számjegyek.
 
 - Kis kerek gomb (három pötty) a gyűrű **bal alsó** részén, minimális átfedéssel.
 - Külön kis ablakot nyit FOBY mellett, **két füllel**, a panel magassága a nagyobbik fülhöz igazodik, semmi ne legyen levágva:
-  1. **Megjelenés és időzítés:** gömb színe (5 preset + egyedi színválasztó), olvasó animáció fókusz alatt (alapból ki), pomodoro fókusz (5–60 perc, 5-ös lépés) és szünet (1–20 perc) csúszkával.
+  1. **Megjelenés és időzítés:** gömb színe (5 preset + egyedi színválasztó), olvasó animáció fókusz alatt (alapból ki), pomodoro fókusz (5–60 perc, 5-ös lépés) és szünet (1–20 perc) csúszkával, „Játék mód” kapcsoló (alapból be).
   2. **Riasztások:** hang be/ki és hangválasztó egy sorban lejátszás gombbal; hangerő (alapból 80%); saját hang felvétele (max 5 mp) vagy hangfájl feltöltése; tálca-villogás (alapból be); Windows értesítés (alapból ki); odaugrik a kurzorhoz (alapból ki).
 - A beállítások tartósan mentve (pl. tauri-plugin-store), és azonnal érvényesülnek a fő ablakban.
 
