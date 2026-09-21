@@ -12,7 +12,9 @@
   "app": {
     "windows": [
       {
+        "label": "main",
         "title": "FORBY",
+        "visible": false,
         "width": 280,
         "height": 266,
         "resizable": false,

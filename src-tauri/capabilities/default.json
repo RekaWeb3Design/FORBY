@@ -7,6 +7,10 @@
     "core:default",
     "opener:default",
     "core:window:allow-set-position",
-    "core:window:allow-set-ignore-cursor-events"
+    "core:window:allow-set-ignore-cursor-events",
+    "core:window:allow-show",
+    "core:window:allow-close",
+    "core:webview:allow-create-webview-window",
+    "store:default"
   ]
 }

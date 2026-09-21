@@ -29,3 +29,10 @@ html, body, #root {margin: 0; height: 100%; background: transparent; overflow: h
   font: 600 20px "Segoe UI", system-ui, sans-serif; font-variant-numeric: tabular-nums; text-align: center;
 }
 .time-input.error {border-color: var(--error); box-shadow: 0 0 0 1px var(--error);}
+
+.settings-btn {
+  position: absolute; box-sizing: border-box; margin: 0; padding: 0;
+  border: 1px solid var(--outline); border-radius: 50%; background: #FFFFFF; color: var(--ink-soft); cursor: pointer;
+}
+.settings-btn:hover {color: var(--ink); background: #F1EFE8;}
+.settings-btn svg {display: block;}

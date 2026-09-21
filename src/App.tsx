@@ -1,21 +1,30 @@
-import {useCallback, useRef} from "react";
+import {useCallback, useEffect, useRef} from "react";
 import {getCurrentWindow} from "@tauri-apps/api/window";
 import Chips from "./Chips";
 import Face from "./Face";
 import Ring from "./Ring";
 import TimeText from "./TimeText";
+import {
+  CHIP_ARC_R,
+  ORB_CX,
+  ORB_CY,
+  ORB_R,
+  SETTINGS_BTN_ANGLE,
+  SETTINGS_BTN_DIST,
+  SETTINGS_BTN_SIZE,
+  TIME_TOP,
+} from "./layout";
 import {createMotion} from "./motion";
-import {PLAY_MODE, READING_ANIMATION} from "./settings";
+import type {Settings} from "./prefs";
+import {writeLastDuration, writePosition} from "./store";
 import {useDragFling} from "./useDragFling";
 import {useFoby} from "./useFoby";
+import {useSettings, useSettingsToggle} from "./useSettings";
 import "./App.css";
 
-// Layout inside the 280×266 window (logical px)
-const ORB_CX = 140;
-const ORB_CY = 126;
-const ORB_R = 55;
-const CHIP_ARC_R = 108; // chip centres; keeps the widest chip row clear of the ring
-const TIME_TOP = 197; // just below the ring
+const BTN_ANGLE_RAD = (SETTINGS_BTN_ANGLE * Math.PI) / 180;
+const BTN_LEFT = ORB_CX + SETTINGS_BTN_DIST * Math.sin(BTN_ANGLE_RAD) - SETTINGS_BTN_SIZE / 2;
+const BTN_TOP = ORB_CY - SETTINGS_BTN_DIST * Math.cos(BTN_ANGLE_RAD) - SETTINGS_BTN_SIZE / 2;
 
 // Interactive elements are marked with data-hit ("circle" for round ones); everything else is click-through.
 const isOverInteractive = (x: number, y: number) =>
@@ -27,12 +36,31 @@ const isOverInteractive = (x: number, y: number) =>
     return x >= r.left && x <= r.right && y >= r.top && y <= r.bottom;
   });
 
-function App() {
-  const {state, view, orbClick, pickChip, wheel, submitDuration} = useFoby();
+type AppProps = {
+  initialSettings: Settings;
+  initialDurationMin: number;
+};
+
+function App({initialSettings, initialDurationMin}: AppProps) {
+  const settings = useSettings(initialSettings);
+  const toggleSettings = useSettingsToggle();
+  const {state, view, orbClick, pickChip, wheel, submitDuration} = useFoby(initialDurationMin, {
+    focusMin: settings.pomodoroFocusMin,
+    breakMin: settings.pomodoroBreakMin,
+  });
   const orbRef = useRef<HTMLDivElement>(null);
   const motion = useRef(createMotion());
-  const activeRef = useDragFling(orbRef, motion, {playMode: PLAY_MODE, onClick: orbClick});
+  const onSettle = useCallback((x: number, y: number) => writePosition({x, y}), []);
+  const activeRef = useDragFling(orbRef, motion, {playMode: settings.playMode, onClick: orbClick, onSettle});
   const ignoreRef = useRef<boolean | null>(null);
+
+  // Remember the last chosen duration
+  const savedDurationRef = useRef(initialDurationMin);
+  useEffect(() => {
+    if (state.durationMin === savedDurationRef.current) return;
+    savedDurationRef.current = state.durationMin;
+    writeLastDuration(state.durationMin);
+  }, [state.durationMin]);
 
   const onCursor = useCallback((x: number, y: number) => {
     const ignore = !activeRef.current && !isOverInteractive(x, y);
@@ -57,12 +85,24 @@ function App() {
       >
         <Face
           state={view.face}
+          color={settings.color}
           smile={view.smile}
-          readingAnimation={READING_ANIMATION}
+          readingAnimation={settings.readingAnimation}
           motion={motion}
           onCursor={onCursor}
         />
       </div>
+      <button
+        className="settings-btn"
+        data-hit="circle"
+        aria-label="Beállítások"
+        style={{left: BTN_LEFT, top: BTN_TOP, width: SETTINGS_BTN_SIZE, height: SETTINGS_BTN_SIZE}}
+        onClick={toggleSettings}
+      >
+        <svg viewBox="0 0 22 22" width="100%" height="100%">
+          {[6.5, 11, 15.5].map((x) => <circle key={x} cx={x} cy="11" r="1.6" fill="currentColor" />)}
+        </svg>
+      </button>
       <TimeText
         big={view.big}
         alert={view.alert}

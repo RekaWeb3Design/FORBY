@@ -1,7 +1,6 @@
 // FORBY state machine and what each state shows. Pure: time comes in with the actions.
 import type {FaceState} from "./Face";
 import {DURATION_MAX, DURATION_MIN, formatElapsed, formatMinutes, formatRemaining} from "./format";
-import {DEFAULT_DURATION_MIN, POMODORO_BREAK_MIN, POMODORO_FOCUS_MIN} from "./settings";
 import {isOvertime, pauseSession, resumeSession, snapshot, startSession, syncSession, type Mode, type Session} from "./timer";
 
 export type Ui = "idle" | "pickMode" | "pickDur" | "run" | "paused" | "alarm" | "summary";
@@ -13,16 +12,20 @@ export type FobyState = {
   ui: Ui;
   pickFor: "timer" | "goal";
   durationMin: number; // last chosen duration
+  pomodoro: Pomodoro; // current settings; a running session keeps its own copy
   session: Session | null;
   now: number;
 };
+
+export type Pomodoro = {focusMin: number; breakMin: number};
 
 export type FobyAction =
   | {type: "orb"; now: number}
   | {type: "chip"; id: ChipId; now: number}
   | {type: "wheel"; delta: number}
   | {type: "submit"; minutes: number; now: number}
-  | {type: "tick"; now: number};
+  | {type: "tick"; now: number}
+  | {type: "settings"; pomodoro: Pomodoro};
 
 const DURATION_CHIPS = [5, 15, 25, 45, 60];
 
@@ -37,19 +40,20 @@ const CHIPS: Partial<Record<Ui, Chip[]>> = {
   paused: [{id: "resume", label: "Folytat"}, {id: "stop", label: "Leállít"}],
 };
 
-export const initialState: FobyState = {
+export const createState = (durationMin: number, pomodoro: Pomodoro): FobyState => ({
   ui: "idle",
   pickFor: "timer",
-  durationMin: DEFAULT_DURATION_MIN,
+  durationMin,
+  pomodoro,
   session: null,
   now: 0,
-};
+});
 
 const start = (state: FobyState, mode: Mode, now: number, durationMin = state.durationMin): FobyState => ({
   ...state,
   ui: "run",
   durationMin,
-  session: startSession(mode, durationMin, {focusMin: POMODORO_FOCUS_MIN, breakMin: POMODORO_BREAK_MIN}, now),
+  session: startSession(mode, durationMin, state.pomodoro, now),
   now,
 });
 
@@ -104,6 +108,8 @@ export const reducer = (state: FobyState, action: FobyAction): FobyState => {
       const done = state.ui === "run" && session.mode === "timer" && snapshot(session, action.now).remainingMs <= 0;
       return {...state, ui: done ? "alarm" : state.ui, session, now: action.now};
     }
+    case "settings":
+      return {...state, pomodoro: action.pomodoro};
   }
 };
 

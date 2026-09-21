@@ -1,6 +1,6 @@
 import {useEffect, useRef, type RefObject} from "react";
 import {availableMonitors, cursorPosition, getCurrentWindow, PhysicalPosition} from "@tauri-apps/api/window";
-import {orbLimits, type Area} from "./bounds";
+import {orbLimits, workAreaOf, type Area} from "./bounds";
 import type {Motion} from "./motion";
 
 // Click vs drag
@@ -38,6 +38,8 @@ type Options = {
   // Off: plain drag that stays where released, fully inside the work area, no motion reactions.
   playMode: boolean;
   onClick?: () => void;
+  // The window came to rest after being moved (physical px), e.g. to save the position
+  onSettle?: (x: number, y: number) => void;
 };
 
 // Own window dragging and throwing. Everything is computed in physical pixels on the orb's centre.
@@ -45,11 +47,11 @@ type Options = {
 export const useDragFling = (
   orbRef: RefObject<HTMLElement | null>,
   motion: RefObject<Motion>,
-  {playMode, onClick}: Options,
+  {playMode, onClick, onSettle}: Options,
 ) => {
   const activeRef = useRef(false);
-  const optsRef = useRef({playMode, onClick});
-  optsRef.current = {playMode, onClick};
+  const optsRef = useRef({playMode, onClick, onSettle});
+  optsRef.current = {playMode, onClick, onSettle};
 
   useEffect(() => {
     const orb = orbRef.current;
@@ -72,13 +74,7 @@ export const useDragFling = (
         const [s, mons] = await Promise.all([win.scaleFactor(), availableMonitors()]);
         if (disposed) return;
         scale = s;
-        areas = mons.map((mon) => {
-          const wa = mon.workArea;
-          const useWa = !!wa && wa.size.width > 0 && wa.size.height > 0;
-          const pos = useWa ? wa.position : mon.position;
-          const size = useWa ? wa.size : mon.size;
-          return {left: pos.x, top: pos.y, right: pos.x + size.width, bottom: pos.y + size.height};
-        });
+        areas = mons.map(workAreaOf);
       } catch (err) {
         warn("monitor refresh failed", err);
       }
@@ -118,9 +114,11 @@ export const useDragFling = (
       }
       sending = false;
     };
+    let lastTarget: {x: number; y: number} | null = null; // latest window position requested since the last settle
     const moveTo = (x: number, y: number) => {
       const g = orbGeom();
       pending = {x: Math.round(x - g.ox * scale), y: Math.round(y - g.oy * scale)};
+      lastTarget = pending;
       if (!sending) void flush();
     };
 
@@ -166,6 +164,10 @@ export const useDragFling = (
       activeRef.current = false;
       m.vx = 0;
       m.vy = 0;
+      if (lastTarget) {
+        optsRef.current.onSettle?.(lastTarget.x, lastTarget.y);
+        lastTarget = null;
+      }
     };
 
     const sampleVelocity = () => {

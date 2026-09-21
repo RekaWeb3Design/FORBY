@@ -35,3 +35,24 @@ export const orbLimits = (areas: Area[], x: number, y: number, r: number, play: 
     softMaxY: area.bottom - r,
   };
 };
+
+type MonitorLike = {
+  position: {x: number; y: number};
+  size: {width: number; height: number};
+  workArea?: {position: {x: number; y: number}; size: {width: number; height: number}};
+};
+
+// A monitor's work area (without the taskbar), or its full area if the work area is unknown
+export const workAreaOf = (m: MonitorLike): Area => {
+  const wa = m.workArea;
+  const useWa = !!wa && wa.size.width > 0 && wa.size.height > 0;
+  const pos = useWa ? wa.position : m.position;
+  const size = useWa ? wa.size : m.size;
+  return {left: pos.x, top: pos.y, right: pos.x + size.width, bottom: pos.y + size.height};
+};
+
+export const containsPoint = (a: Area, x: number, y: number) => x >= a.left && x < a.right && y >= a.top && y < a.bottom;
+
+// Index of the area containing the point, or the nearest one (-1 if there are none)
+export const nearestAreaIndex = (areas: Area[], x: number, y: number) =>
+  areas.reduce((best, a, i) => (best < 0 || distToArea(a, x, y) < distToArea(areas[best], x, y) ? i : best), -1);
