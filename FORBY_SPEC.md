@@ -105,9 +105,13 @@ Időformátum: `m:ss`, egy óra fölött `h:mm:ss`, tabuláris számjegyek.
 
 - Hangok Web Audio-val szintetizálva (prototípus szerint): Csengő (880/660/880/1320 Hz sorozat felhanggal), Harang (523 és 659 Hz inharmonikus felhangokkal), Pittyegés (3× 1200 Hz square), Gong (110/220/331 Hz), valamint Saját hang (a felvett vagy feltöltött fájl az app adatmappájában tárolva).
 - Mikor szól: timer lejártakor, majd 10,2 mp-enként, amíg le nem zárod; cél-stopper minden teljes körénél; pomodoro váltásnál halkabban (70%).
-- Tálca-villogás: `requestUserAttention` alarm-kor, lezáráskor megszűnik.
-- Windows értesítés: rövid toast, pl. „FORBY: lejárt az idő”.
-- Odaugrás: alarm-kor FORBY animálva a kurzor monitorára, a kurzor közelébe ugrik, lezárás után visszatér az eredeti helyére.
+- Saját hang: felvétel max 5 mp, feltöltött fájl max 5 MB és max 10 mp; csak lejátszható (dekódolható) hang menthető.
+- Tálca-villogás (ha be van kapcsolva): `requestUserAttention` timer lejártakor (alarm), a cél-stopper első körénél és pomodoro-váltáskor. Alarm-nál lezáráskor mindenképp megszűnik; a másik kettőnél akkor, amikor FORBY fókuszt kap vagy rákattintasz, de legkésőbb 30 mp után magától.
+- Windows értesítés (ha be van kapcsolva), rövid toast „FORBY” címmel:
+  - timer lejártakor: „Lejárt az idő”;
+  - cél-stopper: csak az első körnél, „Elérted a célt (5:00)”; a további köröknél csak hang, toast nem;
+  - pomodoro-váltáskor: „Szünet következik” / „Vissza a fókuszhoz”.
+- Odaugrás (ha be van kapcsolva), csak timer lejártakor: FORBY animálva a kurzor monitorára, a kurzor közelébe ugrik (a munkaterületen belül), lezárás után visszatér az eredeti helyére. Ha közben arrébb húzod, ott marad, ahová tetted.
 
 ## Fázisok
 

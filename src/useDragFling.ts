@@ -1,4 +1,4 @@
-import {useEffect, useRef, type RefObject} from "react";
+import {useCallback, useEffect, useRef, type RefObject} from "react";
 import {availableMonitors, cursorPosition, getCurrentWindow, PhysicalPosition} from "@tauri-apps/api/window";
 import {orbLimits, workAreaOf, type Area} from "./bounds";
 import type {Motion} from "./motion";
@@ -29,7 +29,9 @@ const IMPACT_FULL_SPEED = 2.5;
 const MONITOR_REFRESH_MS = 1000;
 
 type Sample = {t: number; x: number; y: number};
-type Mode = "idle" | "press" | "drag" | "fling";
+type Mode = "idle" | "press" | "drag" | "fling" | "anim";
+
+export type AnimateTo = (x: number, y: number, ms: number) => Promise<boolean>;
 
 const clamp = (v: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, v));
 
@@ -43,7 +45,8 @@ type Options = {
 };
 
 // Own window dragging and throwing. Everything is computed in physical pixels on the orb's centre.
-// Returns a ref that is true while the orb is pressed, dragged or flying.
+// Returns a ref that is true while the orb is pressed, dragged, flying or animated, and animateTo:
+// an eased move of the window to (x, y) (physical px) that resolves false if the user grabs the orb meanwhile.
 export const useDragFling = (
   orbRef: RefObject<HTMLElement | null>,
   motion: RefObject<Motion>,
@@ -52,6 +55,7 @@ export const useDragFling = (
   const activeRef = useRef(false);
   const optsRef = useRef({playMode, onClick, onSettle});
   optsRef.current = {playMode, onClick, onSettle};
+  const animateRef = useRef<AnimateTo>(async () => false);
 
   useEffect(() => {
     const orb = orbRef.current;
@@ -121,6 +125,11 @@ export const useDragFling = (
       lastTarget = pending;
       if (!sending) void flush();
     };
+    // Programmatic moves (animation) go here: they are not reported through onSettle
+    const moveWindow = (x: number, y: number) => {
+      pending = {x: Math.round(x), y: Math.round(y)};
+      if (!sending) void flush();
+    };
 
     const impact = (dirX: number, dirY: number, speedPhys: number) => {
       const speed = speedPhys / scale;
@@ -145,6 +154,7 @@ export const useDragFling = (
     let cursorBusy = false;
     let raf = 0;
     let last = 0;
+    let animDone: ((completed: boolean) => void) | null = null;
 
     const stopLoop = () => {
       cancelAnimationFrame(raf);
@@ -160,6 +170,8 @@ export const useDragFling = (
     };
     const settle = () => {
       stopLoop();
+      animDone?.(false);
+      animDone = null;
       mode = "idle";
       activeRef.current = false;
       m.vx = 0;
@@ -286,6 +298,30 @@ export const useDragFling = (
       startLoop(flingFrame);
     };
 
+    const easeOut = (p: number) => 1 - Math.pow(1 - p, 3);
+    animateRef.current = async (x, y, ms) => {
+      // A new animation replaces a running one; a user press, drag or fling is never overridden
+      if (mode === "anim") settle();
+      if (mode !== "idle") return false;
+      const from = await win.outerPosition();
+      if (mode !== "idle" || disposed) return false;
+      return new Promise<boolean>((resolve) => {
+        mode = "anim";
+        activeRef.current = true;
+        animDone = resolve;
+        const t0 = performance.now();
+        startLoop((t) => {
+          const p = Math.min(1, (t - t0) / ms);
+          const e = easeOut(p);
+          moveWindow(from.x + (x - from.x) * e, from.y + (y - from.y) * e);
+          if (p < 1) return;
+          animDone = null;
+          settle();
+          resolve(true);
+        });
+      });
+    };
+
     const onDown = (e: PointerEvent) => {
       if (e.button !== 0) return;
       // A press always interrupts a running fling
@@ -339,6 +375,7 @@ export const useDragFling = (
     return () => {
       disposed = true;
       stopLoop();
+      animDone?.(false);
       clearInterval(monitorTimer);
       unlistenScale?.();
       orb.removeEventListener("pointerdown", onDown);
@@ -346,8 +383,10 @@ export const useDragFling = (
       orb.removeEventListener("pointerup", onUp);
       orb.removeEventListener("pointercancel", onUp);
       orb.removeEventListener("lostpointercapture", onUp);
+      animateRef.current = async () => false;
     };
   }, [orbRef, motion]);
 
-  return activeRef;
+  const animateTo = useCallback<AnimateTo>((x, y, ms) => animateRef.current(x, y, ms), []);
+  return {activeRef, animateTo};
 };

@@ -15,6 +15,8 @@
         "label": "main",
         "title": "FORBY",
         "visible": false,
+        "minimizable": false,
+        "additionalBrowserArgs": "--disable-features=msWebOOUI,msPdfOOUI,msSmartScreenProtection --autoplay-policy=no-user-gesture-required",
         "width": 280,
         "height": 266,
         "resizable": false,

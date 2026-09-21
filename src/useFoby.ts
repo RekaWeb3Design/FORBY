@@ -1,10 +1,12 @@
 import {useCallback, useEffect, useMemo, useReducer, useRef} from "react";
 import {createState, describe, reducer, type ChipId, type Pomodoro} from "./foby";
-import {detectEvents, nextTickDelay, snapshot, type Snapshot, type TimerEvent} from "./timer";
+import {detectEvents, nextTickDelay, snapshot, type Session, type Snapshot, type TimerEvent} from "./timer";
+
+export type OnTimerEvent = (event: TimerEvent, snap: Snapshot, session: Session) => void;
 
 // State machine + once-a-second ticking aligned to whole seconds of active time.
 // onEvent reports timer events (the alarms hook in here in phase 5).
-export const useFoby = (initialDurationMin: number, pomodoro: Pomodoro, onEvent?: (event: TimerEvent) => void) => {
+export const useFoby = (initialDurationMin: number, pomodoro: Pomodoro, onEvent?: OnTimerEvent) => {
   const [state, dispatch] = useReducer(reducer, undefined, () => createState(initialDurationMin, pomodoro));
 
   // Settings changes apply to the next session; the running one keeps its snapshot
@@ -32,7 +34,7 @@ export const useFoby = (initialDurationMin: number, pomodoro: Pomodoro, onEvent?
     }
     const snap = snapshot(s, state.now);
     const prev = prevRef.current;
-    if (prev && prev.id === s.startedAt) detectEvents(s.mode, prev.snap, snap).forEach((e) => onEventRef.current?.(e));
+    if (prev && prev.id === s.startedAt) detectEvents(s.mode, prev.snap, snap).forEach((e) => onEventRef.current?.(e, snap, s));
     prevRef.current = {id: s.startedAt, snap};
   }, [state]);
 

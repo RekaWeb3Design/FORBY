@@ -10,7 +10,8 @@
     "core:window:allow-set-ignore-cursor-events",
     "core:window:allow-show",
     "core:window:allow-close",
-    "core:webview:allow-create-webview-window",
-    "store:default"
+    "core:window:allow-request-user-attention",
+    "store:default",
+    "notification:default"
   ]
 }

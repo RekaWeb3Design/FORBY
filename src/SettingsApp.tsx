@@ -11,13 +11,26 @@ import {
   type Settings,
   type SoundId,
 } from "./prefs";
-import {readSettings, SETTINGS_CLOSED_EVENT, SETTINGS_EVENT, writeSettings} from "./store";
+import {CUSTOM_EXTS, CUSTOM_MAX_BYTES, CUSTOM_MAX_SEC, decodeSound, playSound} from "./sounds";
+import {
+  CUSTOM_SOUND_EVENT,
+  loadCustomSound,
+  readCustomSoundInfo,
+  readSettings,
+  saveCustomSound,
+  SETTINGS_CLOSED_EVENT,
+  SETTINGS_EVENT,
+  writeCustomSoundInfo,
+  writeSettings,
+  type CustomSoundInfo,
+} from "./store";
 import "./Settings.css";
 
 const MAIN_LABEL = "main";
 const PANEL_GAP = 12; // logical px between the ring and the panel
 const BLUR_GRACE_MS = 150; // focus may come back right away (e.g. a native dialog closing)
-const PHASE5_HINT = "Az 5. fázisban lesz elérhető";
+const RECORD_MAX_SEC = 5;
+const RECORD_MIME = "audio/webm;codecs=opus";
 
 type Tab = "look" | "alerts";
 
@@ -88,7 +101,13 @@ export default function SettingsApp() {
   const panelRef = useRef<HTMLDivElement>(null);
   const shownRef = useRef(false);
   const closingRef = useRef(false);
-  const pickerOpenRef = useRef(false);
+  const pickerOpenRef = useRef(false); // a native dialog (colour, file, microphone) is open: focus loss must not close
+  const [customInfo, setCustomInfo] = useState<CustomSoundInfo | null>(null);
+  const [soundError, setSoundError] = useState<string | null>(null);
+  const [recordLeft, setRecordLeft] = useState<number | null>(null);
+  const recorderRef = useRef<MediaRecorder | null>(null);
+  const fileRef = useRef<HTMLInputElement>(null);
+  const audioRef = useRef<AudioContext | null>(null);
 
   useEffect(() => {
     readSettings()
@@ -97,6 +116,9 @@ export default function SettingsApp() {
         return DEFAULT_SETTINGS;
       })
       .then(setSettings);
+    readCustomSoundInfo()
+      .then(setCustomInfo)
+      .catch((err) => console.error("FORBY: loading custom sound info failed", err));
   }, []);
 
   // Once rendered, size the window to the panel (the taller tab sets the height) and show it
@@ -111,11 +133,12 @@ export default function SettingsApp() {
   const close = useCallback(async () => {
     if (closingRef.current) return;
     closingRef.current = true;
+    recorderRef.current?.stop();
     await emitTo(MAIN_LABEL, SETTINGS_CLOSED_EVENT, null).catch(() => {});
     await getCurrentWindow().close().catch((err) => console.error("FORBY: closing settings failed", err));
   }, []);
 
-  // Close on Esc and when focus goes elsewhere (clicking beside the panel), but not while a native picker is open
+  // Close on Esc and when focus goes elsewhere (clicking beside the panel), but not while a native dialog is open
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.key === "Escape") void close();
@@ -159,6 +182,101 @@ export default function SettingsApp() {
   };
 
   const customColor = !COLOR_PRESETS.includes(settings.color);
+
+  // Preview the selected sound with the set volume
+  const preview = async () => {
+    try {
+      if (!audioRef.current) audioRef.current = new AudioContext();
+      const ctx = audioRef.current;
+      await ctx.resume();
+      const bytes = settings.sound === "custom" ? await loadCustomSound() : null;
+      const custom = bytes && bytes.byteLength ? await decodeSound(bytes) : null;
+      playSound(ctx, settings.sound, settings.volume, custom);
+    } catch (err) {
+      console.error("FORBY: preview failed", err);
+      setSoundError("A hang nem játszható le");
+    }
+  };
+
+  // Checks and saves a recorded or uploaded sound, then selects it
+  const acceptSound = async (bytes: ArrayBuffer, ext: string, name: string) => {
+    if (bytes.byteLength > CUSTOM_MAX_BYTES) return setSoundError("A fájl nagyobb 5 MB-nál");
+    let buffer: AudioBuffer;
+    try {
+      buffer = await decodeSound(bytes);
+    } catch {
+      return setSoundError("Ez a fájl nem lejátszható hang");
+    }
+    if (buffer.duration > CUSTOM_MAX_SEC + 0.05) return setSoundError(`A hang hosszabb ${CUSTOM_MAX_SEC} mp-nél`);
+    try {
+      await saveCustomSound(bytes, ext);
+    } catch (err) {
+      console.error("FORBY: saving the custom sound failed", err);
+      return setSoundError("A mentés nem sikerült");
+    }
+    const info = {name, durationSec: Math.round(buffer.duration * 10) / 10};
+    writeCustomSoundInfo(info);
+    setCustomInfo(info);
+    setSoundError(null);
+    emitTo(MAIN_LABEL, CUSTOM_SOUND_EVENT, null).catch((err) => console.error("FORBY: sending sound change failed", err));
+    update({sound: "custom"});
+  };
+
+  // Microphone recording, max RECORD_MAX_SEC; pressing again stops early
+  const record = async () => {
+    if (recorderRef.current) {
+      recorderRef.current.stop();
+      return;
+    }
+    let stream: MediaStream;
+    try {
+      pickerOpenRef.current = true;
+      stream = await navigator.mediaDevices.getUserMedia({audio: true});
+    } catch (err) {
+      console.error("FORBY: microphone access failed", err);
+      return setSoundError("Nincs hozzáférés a mikrofonhoz");
+    } finally {
+      pickerOpenRef.current = false;
+    }
+    const mimeType = MediaRecorder.isTypeSupported(RECORD_MIME) ? RECORD_MIME : "audio/webm";
+    const recorder = new MediaRecorder(stream, {mimeType});
+    const chunks: Blob[] = [];
+    let left = RECORD_MAX_SEC;
+    const countdown = window.setInterval(() => setRecordLeft(--left), 1000);
+    const limit = window.setTimeout(() => {
+      if (recorder.state !== "inactive") recorder.stop();
+    }, RECORD_MAX_SEC * 1000);
+    recorder.ondataavailable = (e) => chunks.push(e.data);
+    recorder.onstop = () => {
+      clearInterval(countdown);
+      clearTimeout(limit);
+      stream.getTracks().forEach((t) => t.stop());
+      recorderRef.current = null;
+      setRecordLeft(null);
+      if (closingRef.current) return;
+      new Blob(chunks, {type: mimeType}).arrayBuffer()
+        .then((bytes) => acceptSound(bytes, "webm", "Felvétel"))
+        .catch((err) => console.error("FORBY: reading the recording failed", err));
+    };
+    recorderRef.current = recorder;
+    setSoundError(null);
+    setRecordLeft(left);
+    recorder.start();
+  };
+
+  const upload = () => {
+    pickerOpenRef.current = true;
+    fileRef.current?.click();
+  };
+  const onFile = async (file: File | undefined) => {
+    if (!file) return;
+    const ext = file.name.split(".").pop()?.toLowerCase() ?? "";
+    if (!CUSTOM_EXTS.includes(ext)) return setSoundError(`Nem támogatott fájltípus (${CUSTOM_EXTS.join(", ")})`);
+    await acceptSound(await file.arrayBuffer(), ext, file.name);
+  };
+
+  const customStatus = soundError
+    ?? (customInfo ? `${customInfo.name}, ${customInfo.durationSec.toLocaleString("hu-HU")} mp` : "Még nincs saját hang");
 
   return (
     <div className="panel" ref={panelRef}>
@@ -208,16 +326,30 @@ export default function SettingsApp() {
               <select aria-label="Hang választása" value={settings.sound} disabled={!settings.soundOn} onChange={(e) => update({sound: e.target.value as SoundId})}>
                 {SOUNDS.map((s) => <option key={s.id} value={s.id}>{s.label}</option>)}
               </select>
-              <button className="icon-btn" aria-label="Lejátszás" title={PHASE5_HINT} disabled>▶</button>
+              <button className="icon-btn" aria-label="Lejátszás" title="Előhallgatás" disabled={!settings.soundOn} onClick={() => void preview()}>▶</button>
             </div>
           </Row>
           <Slider label="Hangerő" unit="%" min={0} max={100} step={5} value={Math.round(settings.volume * 100)} onChange={(v) => update({volume: v / 100})} />
           <div className="field">
             <span className="row-label">Saját hang</span>
             <div className="buttons">
-              <button className="btn" title={PHASE5_HINT} disabled>Felvétel (max 5 mp)</button>
-              <button className="btn" title={PHASE5_HINT} disabled>Fájl feltöltése</button>
+              <button className={`btn${recordLeft !== null ? " recording" : ""}`} onClick={() => void record()}>
+                {recordLeft !== null ? `Leállítás (${recordLeft})` : `Felvétel (max ${RECORD_MAX_SEC} mp)`}
+              </button>
+              <button className="btn" disabled={recordLeft !== null} onClick={upload}>Fájl feltöltése</button>
+              <input
+                ref={fileRef}
+                type="file"
+                accept={CUSTOM_EXTS.map((e) => `.${e}`).join(",")}
+                hidden
+                onChange={(e) => {
+                  const file = e.target.files?.[0];
+                  e.target.value = "";
+                  void onFile(file);
+                }}
+              />
             </div>
+            <span className={`status${soundError ? " error" : ""}`} title={customStatus}>{customStatus}</span>
           </div>
           <SwitchRow label="Tálca-villogás" checked={settings.flashTaskbar} onChange={(v) => update({flashTaskbar: v})} />
           <SwitchRow label="Windows értesítés" checked={settings.notification} onChange={(v) => update({notification: v})} />

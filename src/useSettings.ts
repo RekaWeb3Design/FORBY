@@ -1,4 +1,5 @@
 import {useCallback, useEffect, useRef, useState} from "react";
+import {invoke} from "@tauri-apps/api/core";
 import {getCurrentWindow} from "@tauri-apps/api/window";
 import {WebviewWindow} from "@tauri-apps/api/webviewWindow";
 import {ORB_CX, ORB_CY, RING_OUTER} from "./layout";
@@ -10,7 +11,7 @@ export const SETTINGS_LABEL = "settings";
 const REOPEN_GUARD_MS = 500;
 
 // Subscribe to an event sent to the main window; handles unlistening even if the effect ends first
-const useWindowEvent = <T>(name: string, handler: (payload: T) => void) => {
+export const useWindowEvent = <T>(name: string, handler: (payload: T) => void) => {
   const handlerRef = useRef(handler);
   handlerRef.current = handler;
   useEffect(() => {
@@ -51,7 +52,8 @@ export const useSettingsToggle = () => {
       }
       if (Date.now() - closedAtRef.current < REOPEN_GUARD_MS) return;
 
-      // The settings window places itself; it gets the orb centre and the ring radius in physical px
+      // The settings window places itself; it gets the orb centre and the ring radius in physical px.
+      // It is created on the Rust side so it shares the main window's WebView2 browser arguments.
       const win = getCurrentWindow();
       const [pos, scale] = await Promise.all([win.innerPosition(), win.scaleFactor()]);
       const query = new URLSearchParams({
@@ -60,21 +62,7 @@ export const useSettingsToggle = () => {
         cy: String(Math.round(pos.y + ORB_CY * scale)),
         r: String(Math.round(RING_OUTER * scale)),
       });
-      const settingsWin = new WebviewWindow(SETTINGS_LABEL, {
-        url: `index.html?${query}`,
-        title: "FORBY – Beállítások",
-        width: 300,
-        height: 400,
-        visible: false,
-        decorations: false,
-        transparent: true,
-        shadow: false,
-        resizable: false,
-        alwaysOnTop: true,
-        skipTaskbar: true,
-        focus: true,
-      });
-      settingsWin.once("tauri://error", (e) => console.error("FORBY: opening settings failed", e.payload));
+      await invoke("open_settings", {query: query.toString()});
     } catch (err) {
       console.error("FORBY: toggling settings failed", err);
     }

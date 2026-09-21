@@ -67,3 +67,7 @@ select {
 .btn {flex: 1; padding: 0 8px;}
 .buttons {display: flex; gap: 6px;}
 button:disabled, select:disabled {opacity: 0.45; cursor: default;}
+.btn.recording {border-color: #D85A30; color: #D85A30;}
+/* One fixed line so a message never changes the measured panel height */
+.status {height: 16px; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; color: var(--ink-soft);}
+.status.error {color: #E24B4A;}

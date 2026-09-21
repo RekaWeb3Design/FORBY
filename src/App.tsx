@@ -2,6 +2,7 @@ import {useCallback, useEffect, useRef} from "react";
 import {getCurrentWindow} from "@tauri-apps/api/window";
 import Chips from "./Chips";
 import Face from "./Face";
+import type {ChipId} from "./foby";
 import Ring from "./Ring";
 import TimeText from "./TimeText";
 import {
@@ -17,8 +18,9 @@ import {
 import {createMotion} from "./motion";
 import type {Settings} from "./prefs";
 import {writeLastDuration, writePosition} from "./store";
+import {useAlarms} from "./useAlarms";
 import {useDragFling} from "./useDragFling";
-import {useFoby} from "./useFoby";
+import {useFoby, type OnTimerEvent} from "./useFoby";
 import {useSettings, useSettingsToggle} from "./useSettings";
 import "./App.css";
 
@@ -44,14 +46,34 @@ type AppProps = {
 function App({initialSettings, initialDurationMin}: AppProps) {
   const settings = useSettings(initialSettings);
   const toggleSettings = useSettingsToggle();
-  const {state, view, orbClick, pickChip, wheel, submitDuration} = useFoby(initialDurationMin, {
-    focusMin: settings.pomodoroFocusMin,
-    breakMin: settings.pomodoroBreakMin,
-  });
+  const timerEventRef = useRef<OnTimerEvent | null>(null);
+  const {state, view, orbClick, pickChip, wheel, submitDuration} = useFoby(
+    initialDurationMin,
+    {focusMin: settings.pomodoroFocusMin, breakMin: settings.pomodoroBreakMin},
+    (...args) => timerEventRef.current?.(...args),
+  );
   const orbRef = useRef<HTMLDivElement>(null);
   const motion = useRef(createMotion());
-  const onSettle = useCallback((x: number, y: number) => writePosition({x, y}), []);
-  const activeRef = useDragFling(orbRef, motion, {playMode: settings.playMode, onClick: orbClick, onSettle});
+  const userMovedRef = useRef<() => void>(() => {});
+  const onSettle = useCallback((x: number, y: number) => {
+    writePosition({x, y});
+    userMovedRef.current();
+  }, []);
+  const unlockRef = useRef<() => void>(() => {});
+  // Clicks are user gestures: use them to (re)unlock audio as well
+  const onOrbClick = useCallback(() => {
+    unlockRef.current();
+    orbClick();
+  }, [orbClick]);
+  const onPickChip = useCallback((id: ChipId) => {
+    unlockRef.current();
+    pickChip(id);
+  }, [pickChip]);
+  const {activeRef, animateTo} = useDragFling(orbRef, motion, {playMode: settings.playMode, onClick: onOrbClick, onSettle});
+  const alarms = useAlarms(settings, state.ui, animateTo);
+  timerEventRef.current = alarms.onEvent;
+  userMovedRef.current = alarms.userMoved;
+  unlockRef.current = alarms.unlockAudio;
   const ignoreRef = useRef<boolean | null>(null);
 
   // Remember the last chosen duration
@@ -74,7 +96,7 @@ function App({initialSettings, initialDurationMin}: AppProps) {
 
   return (
     <main className="shell">
-      <Chips chips={view.chips} cx={ORB_CX} cy={ORB_CY} radius={CHIP_ARC_R} onPick={pickChip} />
+      <Chips chips={view.chips} cx={ORB_CX} cy={ORB_CY} radius={CHIP_ARC_R} onPick={onPickChip} />
       <Ring ui={state.ui} session={state.session} left={ORB_CX - ORB_R} top={ORB_CY - ORB_R} size={ORB_R * 2} />
       <div
         className="orb"
