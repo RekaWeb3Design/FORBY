@@ -8,6 +8,8 @@ type FaceProps = {
   state: FaceState;
   color?: string;
   readingAnimation?: boolean;
+  // Show the hover smile regardless of the cursor (summary)
+  smile?: boolean;
   // Optional drag/fling state, read every frame without re-rendering
   motion?: RefObject<Motion>;
   // Global cursor position relative to the window (logical px), reported on every poll
@@ -164,14 +166,14 @@ const featureTransform = (feat: Feature, yaw: number, pitch: number, jx = 0, jy 
   };
 };
 
-export default function Face({state, color = DEFAULT_COLOR, readingAnimation = false, motion, onCursor}: FaceProps) {
+export default function Face({state, color = DEFAULT_COLOR, readingAnimation = false, smile = false, motion, onCursor}: FaceProps) {
   const uid = useId().replace(/:/g, "");
   const [hover, setHover] = useState(false);
   const [whoa, setWhoa] = useState(false);
 
   const shape: Shape = whoa
     ? "whoa"
-    : state === "idle" && hover ? "hover" : state === "focus" && readingAnimation ? "focusRead" : state;
+    : (state === "idle" && hover) || smile ? "hover" : state === "focus" && readingAnimation ? "focusRead" : state;
   const features = SHAPES[shape];
   const palette = useMemo(() => makePalette(color), [color]);
 

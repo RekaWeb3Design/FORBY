@@ -1,20 +1,20 @@
-import {useCallback, useEffect, useRef, useState} from "react";
+import {useCallback, useRef} from "react";
 import {getCurrentWindow} from "@tauri-apps/api/window";
-import Face, {type FaceState} from "./Face";
+import Chips from "./Chips";
+import Face from "./Face";
+import TimeText from "./TimeText";
 import {createMotion} from "./motion";
-import {PLAY_MODE} from "./settings";
+import {PLAY_MODE, READING_ANIMATION} from "./settings";
 import {useDragFling} from "./useDragFling";
+import {useFoby} from "./useFoby";
 import "./App.css";
 
-// Temporary: keys 1–6 switch face states until the timer logic drives them.
-const DEV_KEYS: Record<string, FaceState> = {
-  "1": "idle",
-  "2": "focus",
-  "3": "pause",
-  "4": "break",
-  "5": "alarm",
-  "6": "overtime",
-};
+// Layout inside the 280×266 window (logical px)
+const ORB_CX = 140;
+const ORB_CY = 126;
+const ORB_R = 55;
+const CHIP_ARC_R = 108; // chip centres; keeps the widest chip row clear of the ring
+const TIME_TOP = 197; // just below the ring
 
 // Interactive elements are marked with data-hit ("circle" for round ones); everything else is click-through.
 const isOverInteractive = (x: number, y: number) =>
@@ -27,20 +27,11 @@ const isOverInteractive = (x: number, y: number) =>
   });
 
 function App() {
-  const [state, setState] = useState<FaceState>("idle");
+  const {state, view, orbClick, pickChip, wheel, submitDuration} = useFoby();
   const orbRef = useRef<HTMLDivElement>(null);
   const motion = useRef(createMotion());
-  const activeRef = useDragFling(orbRef, motion, {playMode: PLAY_MODE});
+  const activeRef = useDragFling(orbRef, motion, {playMode: PLAY_MODE, onClick: orbClick});
   const ignoreRef = useRef<boolean | null>(null);
-
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      const next = DEV_KEYS[e.key];
-      if (next) setState(next);
-    };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, []);
 
   const onCursor = useCallback((x: number, y: number) => {
     const ignore = !activeRef.current && !isOverInteractive(x, y);
@@ -54,9 +45,31 @@ function App() {
 
   return (
     <main className="shell">
-      <div className="orb" ref={orbRef} data-hit="circle">
-        <Face state={state} motion={motion} onCursor={onCursor} />
+      <Chips chips={view.chips} cx={ORB_CX} cy={ORB_CY} radius={CHIP_ARC_R} onPick={pickChip} />
+      <div
+        className="orb"
+        ref={orbRef}
+        data-hit="circle"
+        style={{left: ORB_CX - ORB_R, top: ORB_CY - ORB_R, width: ORB_R * 2, height: ORB_R * 2}}
+        onWheel={(e) => wheel(e.deltaY < 0 ? 1 : -1)}
+      >
+        <Face
+          state={view.face}
+          smile={view.smile}
+          readingAnimation={READING_ANIMATION}
+          motion={motion}
+          onCursor={onCursor}
+        />
       </div>
+      <TimeText
+        big={view.big}
+        alert={view.alert}
+        lines={view.lines}
+        editable={view.editable}
+        durationMin={state.durationMin}
+        top={TIME_TOP}
+        onSubmit={submitDuration}
+      />
     </main>
   );
 }

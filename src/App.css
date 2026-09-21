@@ -1,5 +1,30 @@
+:root {--ink: #1F1E1C; --ink-soft: #5F5E5A; --outline: rgba(31, 30, 28, 0.14); --alert: #D85A30; --error: #E24B4A;}
 html, body, #root {margin: 0; height: 100%; background: transparent; overflow: hidden;}
-/* 240×260 window: room for the chip arc above the orb and the time below it */
-.shell {position: relative; width: 240px; height: 260px; user-select: none;}
-.orb {position: absolute; left: 65px; top: 80px; width: 110px; height: 110px; border-radius: 50%; cursor: grab; touch-action: none;}
+/* 280×266 window: chip arc above the orb, time below it */
+.shell {position: relative; width: 280px; height: 266px; user-select: none; color: var(--ink); font-family: "Segoe UI", system-ui, sans-serif;}
+.orb {position: absolute; border-radius: 50%; cursor: grab; touch-action: none;}
 .orb:active {cursor: grabbing;}
+
+.chip {
+  position: absolute; visibility: hidden; transform: translate(-50%, -50%);
+  box-sizing: border-box; height: 20px; min-width: 28px; margin: 0; padding: 0 10px;
+  border: 1px solid var(--outline); border-radius: 10px; background: #FFFFFF; color: var(--ink);
+  font: 500 11px/18px "Segoe UI", system-ui, sans-serif; white-space: nowrap; cursor: pointer;
+}
+.chip:hover {background: #F1EFE8;}
+
+.time {
+  position: absolute; left: 50%; transform: translateX(-50%);
+  padding: 3px 12px 5px; border: 1px solid var(--outline); border-radius: 14px;
+  background: rgba(255, 255, 255, 0.78); text-align: center; white-space: nowrap;
+}
+.time-big {font-size: 22px; font-weight: 600; line-height: 26px; font-variant-numeric: tabular-nums;}
+.time-big.alert {color: var(--alert);}
+.time-big.editable {cursor: text;}
+.time-line {font-size: 11px; line-height: 14px; color: var(--ink-soft);}
+.time-input {
+  box-sizing: border-box; width: 76px; height: 26px; padding: 0 4px;
+  border: 1px solid var(--outline); border-radius: 6px; outline: none; background: #FFFFFF; color: var(--ink);
+  font: 600 20px "Segoe UI", system-ui, sans-serif; font-variant-numeric: tabular-nums; text-align: center;
+}
+.time-input.error {border-color: var(--error); box-shadow: 0 0 0 1px var(--error);}
