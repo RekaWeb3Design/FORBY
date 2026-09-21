@@ -61,7 +61,7 @@ export const useDragFling = (
     const warn = (msg: string, err: unknown) => {
       if (warned) return;
       warned = true;
-      console.error(`FOBY: ${msg}`, err);
+      console.error(`FORBY: ${msg}`, err);
     };
 
     // Cached scale factor and monitor work areas, refreshed regularly (mixed-DPI setups)

@@ -251,7 +251,7 @@ export default function Face({state, color = DEFAULT_COLOR, readingAnimation = f
         extRef.current.onCursor?.((cursor.x - inner.x) / scale, (cursor.y - inner.y) / scale);
       } catch (err) {
         if (!warned) {
-          console.error("FOBY: cursor tracking failed", err);
+          console.error("FORBY: cursor tracking failed", err);
           warned = true;
         }
         lookRef.current = {yaw: 0, pitch: 0};

@@ -1,4 +1,4 @@
-# FOBY – specifikáció
+# FORBY – specifikáció
 
 Always-on-top asztali timer widget. Tauri 2 + React + TypeScript, Windows, 3 monitor.
 Ez a dokumentum a jóváhagyott prototípusok alapján készült. Ami itt szerepel, az eldöntött; ami nem, arról kérdezz.
@@ -96,7 +96,7 @@ Időformátum: `m:ss`, egy óra fölött `h:mm:ss`, tabuláris számjegyek.
 ## Beállítások
 
 - Kis kerek gomb (három pötty) a gyűrű **bal alsó** részén, minimális átfedéssel.
-- Külön kis ablakot nyit FOBY mellett, **két füllel**, a panel magassága a nagyobbik fülhöz igazodik, semmi ne legyen levágva:
+- Külön kis ablakot nyit FORBY mellett, **két füllel**, a panel magassága a nagyobbik fülhöz igazodik, semmi ne legyen levágva:
   1. **Megjelenés és időzítés:** gömb színe (5 preset + egyedi színválasztó), olvasó animáció fókusz alatt (alapból ki), pomodoro fókusz (5–60 perc, 5-ös lépés) és szünet (1–20 perc) csúszkával, „Játék mód” kapcsoló (alapból be).
   2. **Riasztások:** hang be/ki és hangválasztó egy sorban lejátszás gombbal; hangerő (alapból 80%); saját hang felvétele (max 5 mp) vagy hangfájl feltöltése; tálca-villogás (alapból be); Windows értesítés (alapból ki); odaugrik a kurzorhoz (alapból ki).
 - A beállítások tartósan mentve (pl. tauri-plugin-store), és azonnal érvényesülnek a fő ablakban.
@@ -106,8 +106,8 @@ Időformátum: `m:ss`, egy óra fölött `h:mm:ss`, tabuláris számjegyek.
 - Hangok Web Audio-val szintetizálva (prototípus szerint): Csengő (880/660/880/1320 Hz sorozat felhanggal), Harang (523 és 659 Hz inharmonikus felhangokkal), Pittyegés (3× 1200 Hz square), Gong (110/220/331 Hz), valamint Saját hang (a felvett vagy feltöltött fájl az app adatmappájában tárolva).
 - Mikor szól: timer lejártakor, majd 10,2 mp-enként, amíg le nem zárod; cél-stopper minden teljes körénél; pomodoro váltásnál halkabban (70%).
 - Tálca-villogás: `requestUserAttention` alarm-kor, lezáráskor megszűnik.
-- Windows értesítés: rövid toast, pl. „FOBY: lejárt az idő”.
-- Odaugrás: alarm-kor FOBY animálva a kurzor monitorára, a kurzor közelébe ugrik, lezárás után visszatér az eredeti helyére.
+- Windows értesítés: rövid toast, pl. „FORBY: lejárt az idő”.
+- Odaugrás: alarm-kor FORBY animálva a kurzor monitorára, a kurzor közelébe ugrik, lezárás után visszatér az eredeti helyére.
 
 ## Fázisok
 

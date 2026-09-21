@@ -39,7 +39,7 @@ function App() {
     ignoreRef.current = ignore;
     getCurrentWindow().setIgnoreCursorEvents(ignore).catch((err) => {
       ignoreRef.current = null;
-      console.error("FOBY: setIgnoreCursorEvents failed", err);
+      console.error("FORBY: setIgnoreCursorEvents failed", err);
     });
   }, [activeRef]);
 

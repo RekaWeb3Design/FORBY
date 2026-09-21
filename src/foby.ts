@@ -1,4 +1,4 @@
-// FOBY state machine and what each state shows. Pure: time comes in with the actions.
+// FORBY state machine and what each state shows. Pure: time comes in with the actions.
 import type {FaceState} from "./Face";
 import {DURATION_MAX, DURATION_MIN, formatElapsed, formatMinutes, formatRemaining} from "./format";
 import {DEFAULT_DURATION_MIN, POMODORO_BREAK_MIN, POMODORO_FOCUS_MIN} from "./settings";
