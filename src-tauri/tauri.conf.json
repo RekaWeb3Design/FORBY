@@ -13,8 +13,8 @@
     "windows": [
       {
         "title": "FOBY",
-        "width": 160,
-        "height": 200,
+        "width": 240,
+        "height": 260,
         "resizable": false,
         "decorations": false,
         "transparent": true,

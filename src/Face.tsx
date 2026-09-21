@@ -1,5 +1,6 @@
-import {useEffect, useId, useMemo, useRef, useState, type ReactNode} from "react";
+import {useEffect, useId, useMemo, useRef, useState, type ReactNode, type RefObject} from "react";
 import {cursorPosition, getCurrentWindow} from "@tauri-apps/api/window";
+import type {Motion} from "./motion";
 
 export type FaceState = "idle" | "focus" | "pause" | "break" | "alarm" | "overtime";
 
@@ -7,9 +8,13 @@ type FaceProps = {
   state: FaceState;
   color?: string;
   readingAnimation?: boolean;
+  // Optional drag/fling state, read every frame without re-rendering
+  motion?: RefObject<Motion>;
+  // Global cursor position relative to the window (logical px), reported on every poll
+  onCursor?: (x: number, y: number) => void;
 };
 
-type Shape = FaceState | "hover" | "focusRead";
+type Shape = FaceState | "hover" | "focusRead" | "whoa";
 
 type Feature = {
   lon: number;
@@ -39,6 +44,20 @@ const MAX_PITCH = 0.5;
 const LOOK_RANGE_PX = 400;
 const SMOOTHING = 0.18;
 
+// Motion reactions (speeds in logical px/ms)
+const MOTION_SMOOTHING = 0.35;
+const LAG_GAIN = 0.3;
+const LAG_MAX = 0.5;
+const STRETCH_GAIN = 0.11;
+const STRETCH_MAX = 0.22;
+const STRETCH_THIN = 0.5;
+const WHOA_ON = 1.8;
+const WHOA_OFF = 1.2;
+const IMPACT_MS = 240;
+const IMPACT_SQUASH = 0.2;
+const TAP_MS = 320;
+const TAP_SQUASH = 0.12;
+
 const R = 90;
 const DEG = Math.PI / 180;
 const DEFAULT_COLOR = "#EDEBE4";
@@ -49,6 +68,7 @@ const pill = (h: number, w = 14) => (
 const smile = <path className="ln" strokeWidth={5} d="M-6 0 A6 6 0 0 0 6 0" />;
 const closedEye = <path className="ln" strokeWidth={6} d="M-9 -2 A9 9 0 0 0 9 -2" />;
 const happyEye = <path className="ln" strokeWidth={7} d="M-8 4 A8 8 0 0 1 8 4" />;
+const whoaMouth = <circle className="ln" strokeWidth={3.5} r={4.5} />;
 const alarmMouth = (
   <>
     <g className="calm"><circle className="fc" r={5} /></g>
@@ -75,6 +95,11 @@ const SHAPES: Record<Shape, Feature[]> = {
     f(-13, -9, pill(44), {blink: "none", alarmEye: true}),
     f(13, -9, pill(44), {blink: "none", alarmEye: true}),
     f(0, 17, alarmMouth, {blink: "none", brrMouth: true}),
+  ],
+  whoa: [
+    f(-13, -9, pill(44), {blink: "none"}),
+    f(13, -9, pill(44), {blink: "none"}),
+    f(0, 17, whoaMouth, {blink: "none"}),
   ],
   overtime: [
     f(-13, -5, pill(28), {side: 0}),
@@ -139,11 +164,14 @@ const featureTransform = (feat: Feature, yaw: number, pitch: number, jx = 0, jy 
   };
 };
 
-export default function Face({state, color = DEFAULT_COLOR, readingAnimation = false}: FaceProps) {
+export default function Face({state, color = DEFAULT_COLOR, readingAnimation = false, motion, onCursor}: FaceProps) {
   const uid = useId().replace(/:/g, "");
   const [hover, setHover] = useState(false);
+  const [whoa, setWhoa] = useState(false);
 
-  const shape: Shape = state === "idle" && hover ? "hover" : state === "focus" && readingAnimation ? "focusRead" : state;
+  const shape: Shape = whoa
+    ? "whoa"
+    : state === "idle" && hover ? "hover" : state === "focus" && readingAnimation ? "focusRead" : state;
   const features = SHAPES[shape];
   const palette = useMemo(() => makePalette(color), [color]);
 
@@ -161,6 +189,10 @@ export default function Face({state, color = DEFAULT_COLOR, readingAnimation = f
   const pitchRef = useRef(0);
   const blinkRef = useRef(1);
   const slowBlinkRef = useRef(1);
+  const extRef = useRef({motion, onCursor});
+  extRef.current = {motion, onCursor};
+  const velRef = useRef({x: 0, y: 0});
+  const whoaRef = useRef(false);
 
   // Hover on the parent .orb (the SVG itself ignores pointer events so dragging keeps working)
   useEffect(() => {
@@ -214,6 +246,7 @@ export default function Face({state, color = DEFAULT_COLOR, readingAnimation = f
         const d = Math.hypot(dx, dy) || 1;
         const k = Math.min(1, d / LOOK_RANGE_PX);
         lookRef.current = {yaw: (dx / d) * k * MAX_YAW, pitch: (dy / d) * k * MAX_PITCH};
+        extRef.current.onCursor?.((cursor.x - inner.x) / scale, (cursor.y - inner.y) / scale);
       } catch (err) {
         if (!warned) {
           console.error("FOBY: cursor tracking failed", err);
@@ -283,6 +316,20 @@ export default function Face({state, color = DEFAULT_COLOR, readingAnimation = f
         : [ease(ramp(om, end - 3500, end - 1680)), ease(ramp(om, end - 2800, end - 1120))];
       if (s === "overtime") gp += 0.2 * (drowsy[0] + drowsy[1]) / 2;
 
+      // Motion: features lag behind (slide against the movement), fast movement shows the "whoa" face
+      const mo = extRef.current.motion?.current;
+      const vel = velRef.current;
+      vel.x += ((mo ? mo.vx : 0) - vel.x) * MOTION_SMOOTHING;
+      vel.y += ((mo ? mo.vy : 0) - vel.y) * MOTION_SMOOTHING;
+      const speed = Math.hypot(vel.x, vel.y);
+      gy += Math.max(-LAG_MAX, Math.min(LAG_MAX, -vel.x * LAG_GAIN));
+      gp += Math.max(-LAG_MAX, Math.min(LAG_MAX, -vel.y * LAG_GAIN));
+      const fast = whoaRef.current ? speed > WHOA_OFF : speed > WHOA_ON;
+      if (fast !== whoaRef.current) {
+        whoaRef.current = fast;
+        setWhoa(fast);
+      }
+
       yawRef.current += (gy - yawRef.current) * SMOOTHING;
       pitchRef.current += (gp - pitchRef.current) * SMOOTHING;
 
@@ -317,7 +364,32 @@ export default function Face({state, color = DEFAULT_COLOR, readingAnimation = f
       const by = s === "overtime" && om >= end - 700 && om < end - 350
         ? -4 * Math.sin(((om - (end - 700)) / 350) * Math.PI)
         : 0;
-      bodyRef.current?.setAttribute("transform", `translate(${bx.toFixed(2)} ${by.toFixed(2)})`);
+      // Body deformation around the centre: stretch along the movement, squash on wall impact and on tap
+      const deform: string[] = [];
+      const st = Math.min(STRETCH_MAX, speed * STRETCH_GAIN);
+      if (st > 0.002) {
+        const a = (Math.atan2(vel.y, vel.x) / DEG).toFixed(1);
+        deform.push(`rotate(${a}) scale(${(1 + st).toFixed(3)} ${(1 - st * STRETCH_THIN).toFixed(3)}) rotate(${-a})`);
+      }
+      if (mo) {
+        const ip = (t - mo.impactAt) / IMPACT_MS;
+        if (ip >= 0 && ip < 1) {
+          const k = IMPACT_SQUASH * mo.impactPower * Math.sin(Math.PI * ip);
+          const a = (Math.atan2(mo.impactY, mo.impactX) / DEG).toFixed(1);
+          // Shift towards the wall so the contact side stays put
+          deform.push(`rotate(${a}) translate(${(k * R).toFixed(2)} 0) scale(${(1 - k).toFixed(3)} ${(1 + k / 2).toFixed(3)}) rotate(${-a})`);
+        }
+        const tp = (t - mo.tapAt) / TAP_MS;
+        if (tp >= 0 && tp < 1) {
+          const k = TAP_SQUASH * Math.sin(tp * 2 * Math.PI) * (1 - tp);
+          deform.push(`translate(0 ${(k * R).toFixed(2)}) scale(${(1 + k * 0.6).toFixed(3)} ${(1 - k).toFixed(3)})`);
+        }
+      }
+      const base = `translate(${bx.toFixed(2)} ${by.toFixed(2)})`;
+      bodyRef.current?.setAttribute(
+        "transform",
+        deform.length ? `${base} translate(100 100) ${deform.join(" ")} translate(-100 -100)` : base,
+      );
 
       if (zzRef.current) {
         const c = (t % 2600) / 2600;
