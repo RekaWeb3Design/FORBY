@@ -133,3 +133,9 @@ Időformátum: `m:ss`, egy óra fölött `h:mm:ss`, tabuláris számjegyek.
 4. Beállítás-gomb, beállítás-ablak két füllel, tartós mentés.
 5. Riasztások: hangok, saját hang, tálca-villogás, értesítés, odaugrás.
 6. Indítás a géppel (autostart), tálcaikon kilépés menüvel.
+
+## Ismert apróságok
+
+- Autostart: a `HKCU\Software\Microsoft\Windows\CurrentVersion\Run` bejegyzésben („FORBY”) az exe útvonala idézőjelek nélkül szerepel (a `tauri-plugin-autostart` így írja). Szóközt tartalmazó felhasználónévnél (pl. `C:\Users\Kis Anna\AppData\Local\FORBY\FORBY.exe`) emiatt gond lehet az indítással.
+
+## Ötletek
