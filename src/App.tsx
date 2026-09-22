@@ -57,11 +57,7 @@ function App({initialSettings, initialDurationMin}: AppProps) {
   );
   const orbRef = useRef<HTMLDivElement>(null);
   const motion = useRef(createMotion());
-  const userMovedRef = useRef<() => void>(() => {});
-  const onSettle = useCallback((x: number, y: number) => {
-    writePosition({x, y});
-    userMovedRef.current();
-  }, []);
+  const onSettle = useCallback((x: number, y: number) => writePosition({x, y}), []);
   const unlockRef = useRef<() => void>(() => {});
   const clickedRef = useRef<() => void>(() => {});
   // Clicks are user gestures: use them to (re)unlock audio as well; a click also stops the soft flashing
@@ -79,7 +75,6 @@ function App({initialSettings, initialDurationMin}: AppProps) {
   const {activeRef, animateTo} = useDragFling(orbRef, motion, {playMode: settings.playMode, onClick: onOrbClick, onSettle});
   const alarms = useAlarms(settings, state.ui, animateTo);
   timerEventRef.current = alarms.onEvent;
-  userMovedRef.current = alarms.userMoved;
   unlockRef.current = alarms.unlockAudio;
   clickedRef.current = alarms.clicked;
   const ignoreRef = useRef<boolean | null>(null);
@@ -100,7 +95,6 @@ function App({initialSettings, initialDurationMin}: AppProps) {
         const y = Math.round((a.top + a.bottom) / 2 - ORB_CY * mon.scaleFactor);
         await getCurrentWindow().setPosition(new PhysicalPosition(x, y));
         writePosition({x, y});
-        alarms.userMoved(); // no jump back after an alarm
       } catch (err) {
         logError("finding FORBY failed", err);
       }

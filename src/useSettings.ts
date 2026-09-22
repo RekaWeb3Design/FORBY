@@ -3,7 +3,7 @@ import {invoke} from "@tauri-apps/api/core";
 import {getCurrentWindow} from "@tauri-apps/api/window";
 import {WebviewWindow} from "@tauri-apps/api/webviewWindow";
 import {ORB_CX, ORB_CY, RING_OUTER} from "./layout";
-import {logError} from "./log";
+import {logError, logInfo} from "./log";
 import {normalizeSettings, type Settings} from "./prefs";
 import {SETTINGS_CLOSED_EVENT, SETTINGS_EVENT, TRAY_SETTINGS_EVENT} from "./store";
 
@@ -35,7 +35,14 @@ export const useWindowEvent = <T>(name: string, handler: (payload: T) => void) =
 // Current settings in the main window; changes from the settings window arrive as events and apply at once
 export const useSettings = (initial: Settings) => {
   const [settings, setSettings] = useState(initial);
-  useWindowEvent<unknown>(SETTINGS_EVENT, (payload) => setSettings(normalizeSettings(payload)));
+  const currentRef = useRef(initial);
+  useWindowEvent<unknown>(SETTINGS_EVENT, (payload) => {
+    const next = normalizeSettings(payload);
+    const changed = (Object.keys(next) as (keyof Settings)[]).filter((k) => next[k] !== currentRef.current[k]);
+    if (changed.length) logInfo(`settings received: ${changed.map((k) => `${k}=${next[k]}`).join(", ")}`);
+    currentRef.current = next;
+    setSettings(next);
+  });
   return settings;
 };
 

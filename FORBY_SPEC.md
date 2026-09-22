@@ -111,19 +111,20 @@ Időformátum: `m:ss`, egy óra fölött `h:mm:ss`, tabuláris számjegyek.
   - timer lejártakor: „Lejárt az idő”;
   - cél-stopper: csak az első körnél, „Elérted a célt (5:00)”; a további köröknél csak hang, toast nem;
   - pomodoro-váltáskor: „Szünet következik” / „Vissza a fókuszhoz”.
-- Odaugrás (ha be van kapcsolva), csak timer lejártakor: FORBY animálva a kurzor monitorára, a kurzor közelébe ugrik (a munkaterületen belül), lezárás után visszatér az eredeti helyére. Ha közben arrébb húzod, ott marad, ahová tetted.
+- Odaugrás (ha be van kapcsolva), csak timer lejártakor: FORBY animálva a kurzor monitorára, a kurzor közelébe ugrik (a munkaterületen belül). Ha a kurzor 200 px-en belül van, nem ugrik. Lezárás után ott marad, ahová ugrott, és ez lesz az új mentett pozíciója (nincs visszaugrás).
 
 ## Indítás és tálcaikon
 
 - „Indítás a géppel” kapcsoló a „Megjelenés és időzítés” fülön, alapból be. A fő ablak induláskor és minden változáskor a beállításhoz igazítja a HKCU `Run` bejegyzést („FORBY”). Dev buildben nem regisztrálja magát. Eltávolításkor az installer törli a bejegyzést.
 - Tálcaikon (értesítési terület), „FORBY” tooltippel. Bal kattintás: FORBY előjön és fókuszt kap. Jobb kattintás menü:
   - „Beállítások”: megnyitja a beállítás-ablakot FORBY mellett (ha nyitva van, előre hozza);
-  - „FORBY megkeresése”: a gömb közepét a fő monitor munkaterületének közepére teszi, és ott marad (egy riasztás utáni visszaugrás elmarad);
+  - „FORBY megkeresése”: a gömb közepét a fő monitor munkaterületének közepére teszi, és ez lesz az új mentett pozíciója;
   - „Kilépés”.
 
-## Telepítő
+## Telepítő és napló
 
-- NSIS, felhasználói szintű telepítés (admin jog nélkül, `%LOCALAPPDATA%`).
+- NSIS, felhasználói szintű telepítés (admin jog nélkül, alapból `%LOCALAPPDATA%\FORBY`).
+- Napló (a telepített appban is): `%LOCALAPPDATA%\studio.wow.forby\logs\forby.log`, soronként `<idő> [FORBY error|warn|info] <üzenet>`, 1 MB fölött új fájl indul.
 
 ## Fázisok
 

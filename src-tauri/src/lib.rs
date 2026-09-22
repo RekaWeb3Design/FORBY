@@ -120,15 +120,53 @@ fn read_custom_sound(app: AppHandle) -> Result<Response, String> {
     }
 }
 
-// Frontend errors and alarm traces, printed to the terminal running `tauri dev`
-#[tauri::command]
-fn log(level: String, message: String) {
-    eprintln!("[FORBY {level}] {message}");
+// Log lines: "<local time> [FORBY <level>] <message>", to the terminal running `tauri dev` and to
+// %LOCALAPPDATA%\studio.wow.forby\logs\forby.log (the installed app too)
+const LOG_TARGET: &str = "forby";
+const LOG_FILE: &str = "forby";
+const LOG_MAX_BYTES: u128 = 1024 * 1024; // then the file is rotated, keeping only the newest
+
+fn log_plugin<R: tauri::Runtime>() -> tauri::plugin::TauriPlugin<R> {
+    use tauri_plugin_log::{RotationStrategy, Target, TargetKind, TimezoneStrategy};
+    tauri_plugin_log::Builder::new()
+        .clear_targets()
+        .targets([
+            Target::new(TargetKind::Stdout),
+            Target::new(TargetKind::LogDir { file_name: Some(LOG_FILE.into()) }),
+        ])
+        .level(log::LevelFilter::Warn)
+        .level_for(LOG_TARGET, log::LevelFilter::Info)
+        .max_file_size(LOG_MAX_BYTES)
+        .rotation_strategy(RotationStrategy::KeepOne)
+        .format(|out, message, record| {
+            let t = TimezoneStrategy::UseLocal.get_now();
+            out.finish(format_args!(
+                "{:04}-{:02}-{:02} {:02}:{:02}:{:02} [FORBY {}] {}",
+                t.year(),
+                u8::from(t.month()),
+                t.day(),
+                t.hour(),
+                t.minute(),
+                t.second(),
+                record.level().as_str().to_ascii_lowercase(),
+                message
+            ))
+        })
+        .build()
 }
 
-// Taskbar flashing through FlashWindowEx directly. Tauri's requestUserAttention does nothing while
-// FORBY is the active window (e.g. right after a click on it started the timer); FLASHW_TIMER keeps
-// flashing until it is stopped, whether FORBY is active or not.
+// Frontend errors and alarm traces
+#[tauri::command]
+fn log(level: String, message: String) {
+    match level.as_str() {
+        "error" => log::error!(target: LOG_TARGET, "{message}"),
+        "warn" => log::warn!(target: LOG_TARGET, "{message}"),
+        _ => log::info!(target: LOG_TARGET, "{message}"),
+    }
+}
+
+// Taskbar flashing through FlashWindowEx directly (Tauri's requestUserAttention returns early while
+// FORBY is the active window). FLASHW_TIMER keeps flashing until it is stopped.
 #[cfg(windows)]
 mod flash {
     #[repr(C)]
@@ -142,6 +180,11 @@ mod flash {
     #[link(name = "user32")]
     extern "system" {
         fn FlashWindowEx(pfwi: *const FlashWInfo) -> i32;
+        fn GetForegroundWindow() -> *mut std::ffi::c_void;
+    }
+
+    pub fn is_foreground(hwnd: *mut std::ffi::c_void) -> bool {
+        unsafe { GetForegroundWindow() == hwnd }
     }
     const FLASHW_STOP: u32 = 0;
     const FLASHW_ALL: u32 = 3; // caption and taskbar button
@@ -165,6 +208,9 @@ fn flash_taskbar(window: WebviewWindow, on: bool) -> Result<(), String> {
     #[cfg(windows)]
     {
         let hwnd = window.hwnd().map_err(|e| e.to_string())?.0;
+        if on && flash::is_foreground(hwnd) {
+            log::info!(target: LOG_TARGET, "flash requested while FORBY is the foreground window");
+        }
         flash::set(hwnd, on);
         Ok(())
     }
@@ -221,10 +267,12 @@ async fn show_toast(app: AppHandle, body: String) -> Result<(), String> {
         let unbundled = dir.ends_with(&format!("{sep}target{sep}debug")) || dir.ends_with(&format!("{sep}target{sep}release"));
         let app_id = if unbundled { Toast::POWERSHELL_APP_ID.to_string() } else { app.config().identifier.clone() };
         if let Some(profile) = quiet_hours_profile().filter(|&p| p != 0) {
-            eprintln!(
-                "[FORBY warn] Windows \"Ne zavarjanak\" mode is on (profile {profile}): the toast goes to the notification centre without a banner"
+            log::warn!(
+                target: LOG_TARGET,
+                "Windows \"Ne zavarjanak\" mode is on (profile {profile}): the toast goes to the notification centre without a banner"
             );
         }
+        log::info!(target: LOG_TARGET, "toast with app id {app_id}");
         Toast::new(&app_id)
             .title("FORBY")
             .text1(&body)
@@ -244,7 +292,7 @@ async fn show_toast(app: AppHandle, body: String) -> Result<(), String> {
 #[tauri::command]
 fn set_autostart(app: AppHandle, enabled: bool) -> Result<(), String> {
     if tauri::is_dev() {
-        eprintln!("[FORBY info] dev mode: autostart not changed (setting: {})", if enabled { "on" } else { "off" });
+        log::info!(target: LOG_TARGET, "dev mode: autostart not changed (setting: {})", if enabled { "on" } else { "off" });
         return Ok(());
     }
     let manager = app.autolaunch();
@@ -296,7 +344,7 @@ fn create_tray(app: &AppHandle) -> tauri::Result<()> {
             let emit = |name: &str| {
                 show_main(app);
                 if let Err(e) = app.emit_to(MAIN_LABEL, name, ()) {
-                    eprintln!("[FORBY error] tray: sending {name} failed: {e}");
+                    log::error!(target: LOG_TARGET, "tray: sending {name} failed: {e}");
                 }
             };
             match event.id().as_ref() {
@@ -318,6 +366,7 @@ fn create_tray(app: &AppHandle) -> tauri::Result<()> {
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
+        .plugin(log_plugin())
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_store::Builder::new().build())
         .plugin(tauri_plugin_autostart::Builder::new().app_name("FORBY").build())

@@ -1,9 +1,10 @@
 import React from "react";
 import ReactDOM from "react-dom/client";
+import {getVersion} from "@tauri-apps/api/app";
 import {availableMonitors, getCurrentWindow, PhysicalPosition, primaryMonitor} from "@tauri-apps/api/window";
 import {containsPoint, workAreaOf} from "./bounds";
 import {CONTENT_BOTTOM, CONTENT_RIGHT, DEFAULT_MARGIN, ORB_CX, ORB_CY} from "./layout";
-import {logError} from "./log";
+import {logError, logInfo} from "./log";
 import {DEFAULT_DURATION_MIN, DEFAULT_SETTINGS} from "./prefs";
 import {readLastDuration, readPosition, readSettings, type Position} from "./store";
 
@@ -67,6 +68,10 @@ const bootMain = async () => {
       logError("default placement failed", placeErr);
     }
   } finally {
+    const on = (v: boolean) => (v ? "on" : "off");
+    getVersion()
+      .catch(() => "?")
+      .then((v) => logInfo(`FORBY ${v} started (flash ${on(settings.flashTaskbar)}, toast ${on(settings.notification)}, jump ${on(settings.jumpToCursor)}, sound ${settings.soundOn ? settings.sound : "off"})`));
     win.show().catch((err) => logError("showing the window failed", err));
     const {default: App} = await appModule;
     render(<App initialSettings={settings} initialDurationMin={durationMin} />);

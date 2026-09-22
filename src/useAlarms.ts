@@ -1,14 +1,14 @@
 import {useCallback, useEffect, useRef} from "react";
 import {invoke} from "@tauri-apps/api/core";
 import {availableMonitors, cursorPosition, getCurrentWindow} from "@tauri-apps/api/window";
-import {containsPoint, nearestAreaIndex, workAreaOf} from "./bounds";
+import {nearestAreaIndex, workAreaOf} from "./bounds";
 import type {Ui} from "./foby";
 import {formatMinutes} from "./format";
 import {CONTENT_BOTTOM, ORB_CX, ORB_CY, RING_OUTER} from "./layout";
 import {logError, logInfo} from "./log";
 import type {Settings} from "./prefs";
 import {createAudio, decodeSound, playSound} from "./sounds";
-import {ALARM_TEST_EVENT, CUSTOM_SOUND_EVENT, loadCustomSound, type AlarmTest} from "./store";
+import {ALARM_TEST_EVENT, CUSTOM_SOUND_EVENT, loadCustomSound, writePosition, type AlarmTest} from "./store";
 import type {AnimateTo} from "./useDragFling";
 import type {OnTimerEvent} from "./useFoby";
 import {useWindowEvent} from "./useSettings";
@@ -27,9 +27,6 @@ const JUMP_MARGIN_BOTTOM = CONTENT_BOTTOM - ORB_CY + 6; // the time pill below m
 // Dev test buttons in the settings window
 const TEST_FLASH_MS = 5000;
 const TEST_JUMP_DELAY_MS = 3000; // time to move the cursor away from the settings window
-const TEST_JUMP_HOLD_MS = 3000; // then it jumps back
-
-type Jump = {origin: {x: number; y: number}; userMoved: boolean};
 
 // Windows toast, sent by the Rust side (errors come back and are logged)
 const notify = async (body: string) => {
@@ -51,7 +48,6 @@ export const useAlarms = (settings: Settings, ui: Ui, animateTo: AnimateTo) => {
   const audioRef = useRef(createAudio());
   const customRef = useRef<AudioBuffer | null>(null);
   const softFlashRef = useRef<number | null>(null);
-  const jumpRef = useRef<Jump | null>(null);
 
   // Custom sound: loaded at start and whenever the settings window saves a new one
   const loadCustom = useCallback(async () => {
@@ -114,6 +110,7 @@ export const useAlarms = (settings: Settings, ui: Ui, animateTo: AnimateTo) => {
   }, [stopFlash]);
 
   // Jump next to the cursor on its monitor, keeping the orb, ring and time inside the work area.
+  // FORBY stays there (no jump back) and that becomes its saved position.
   // force: also when the cursor is already close (test button)
   const jump = useCallback(async (force = false) => {
     try {
@@ -134,32 +131,17 @@ export const useAlarms = (settings: Settings, ui: Ui, animateTo: AnimateTo) => {
       if (cx > a.right - JUMP_MARGIN * s) cx = cursor.x - JUMP_OFFSET * s;
       cx = Math.min(Math.max(cx, a.left + JUMP_MARGIN * s), a.right - JUMP_MARGIN * s);
       const cy = Math.min(Math.max(cursor.y - JUMP_OFFSET * s, a.top + JUMP_MARGIN * s), a.bottom - JUMP_MARGIN_BOTTOM * s);
-      jumpRef.current = {origin: {x: pos.x, y: pos.y}, userMoved: false};
-      const done = await animateTo(cx - ORB_CX * s, cy - ORB_CY * s, JUMP_MS);
-      logInfo(done ? "jumped to the cursor" : "jump interrupted (FORBY was being dragged or thrown)");
+      const x = Math.round(cx - ORB_CX * s);
+      const y = Math.round(cy - ORB_CY * s);
+      if (!(await animateTo(x, y, JUMP_MS))) return logInfo("jump interrupted (FORBY was being dragged or thrown)");
+      writePosition({x, y});
+      logInfo("jumped to the cursor");
     } catch (err) {
       logError("jump to cursor failed", err);
     }
   }, [animateTo]);
 
-  // Back to where it was, unless the user moved FORBY meanwhile or that place is no longer on a monitor
-  const jumpBack = useCallback(async () => {
-    const j = jumpRef.current;
-    jumpRef.current = null;
-    if (!j) return;
-    if (j.userMoved) return logInfo("no jump back: FORBY was moved meanwhile");
-    try {
-      const monitors = await availableMonitors();
-      const visible = monitors.some((m) =>
-        containsPoint(workAreaOf(m), j.origin.x + ORB_CX * m.scaleFactor, j.origin.y + ORB_CY * m.scaleFactor));
-      if (visible) await animateTo(j.origin.x, j.origin.y, JUMP_MS);
-      else logInfo("no jump back: the original place is no longer on a monitor");
-    } catch (err) {
-      logError("jumping back failed", err);
-    }
-  }, [animateTo]);
-
-  // Timer alarm: sound now and every 10.2 s, toast, flashing, jump; all undone when it is closed
+  // Timer alarm: sound now and every 10.2 s, toast, flashing, jump; sound and flashing stop when it is closed
   const isAlarm = ui === "alarm";
   useEffect(() => {
     if (!isAlarm) return;
@@ -173,9 +155,8 @@ export const useAlarms = (settings: Settings, ui: Ui, animateTo: AnimateTo) => {
     return () => {
       clearInterval(repeat);
       stopFlash();
-      void jumpBack();
     };
-  }, [isAlarm, play, flash, stopFlash, jump, jumpBack]);
+  }, [isAlarm, play, flash, stopFlash, jump]);
 
   const onEvent = useCallback<OnTimerEvent>((event, snap, session) => {
     const s = settingsRef.current;
@@ -198,12 +179,7 @@ export const useAlarms = (settings: Settings, ui: Ui, animateTo: AnimateTo) => {
     logInfo(`test: ${test}`);
     if (test === "flash") startFlash(TEST_FLASH_MS);
     if (test === "toast") void notify("Teszt értesítés");
-    if (test === "jump") {
-      window.setTimeout(async () => {
-        await jump(true);
-        window.setTimeout(() => void jumpBack(), TEST_JUMP_HOLD_MS);
-      }, TEST_JUMP_DELAY_MS);
-    }
+    if (test === "jump") window.setTimeout(() => void jump(true), TEST_JUMP_DELAY_MS);
   });
 
   return {
@@ -214,9 +190,5 @@ export const useAlarms = (settings: Settings, ui: Ui, animateTo: AnimateTo) => {
     }, [stopFlash]),
     // A user gesture (click on the orb): lets audio run even if autoplay were blocked
     unlockAudio: useCallback(() => audioRef.current.unlock(), []),
-    // The user moved FORBY: it stays there after the alarm
-    userMoved: useCallback(() => {
-      if (jumpRef.current) jumpRef.current.userMoved = true;
-    }, []),
   };
 };
