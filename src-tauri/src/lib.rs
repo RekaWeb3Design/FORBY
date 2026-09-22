@@ -1,5 +1,6 @@
 use std::time::Duration;
 use tauri::ipc::{InvokeBody, Request, Response};
+use tauri::image::Image;
 use tauri::menu::{Menu, MenuItem, PredefinedMenuItem};
 use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
 use tauri::{AppHandle, Emitter, Manager, WebviewUrl, WebviewWindow, WebviewWindowBuilder, WindowEvent};
@@ -18,6 +19,15 @@ const TRAY_FIND: &str = "find";
 const TRAY_QUIT: &str = "quit";
 const TRAY_SETTINGS_EVENT: &str = "tray-settings";
 const TRAY_FIND_EVENT: &str = "tray-find";
+
+// Simplified tray icon (icons/source/tray.svg) pre-rendered per size; 16 px at 100% display scaling
+const TRAY_ICON_BASE: f64 = 16.0;
+const TRAY_ICONS: [(u32, &[u8]); 4] = [
+    (16, include_bytes!("../icons/source/tray-16.png")),
+    (20, include_bytes!("../icons/source/tray-20.png")),
+    (24, include_bytes!("../icons/source/tray-24.png")),
+    (32, include_bytes!("../icons/source/tray-32.png")),
+];
 
 // Custom alarm sound: one fixed file in the app data folder
 const SOUND_DIR: &str = "sounds";
@@ -256,6 +266,17 @@ fn show_main(app: &AppHandle) {
     }
 }
 
+// The smallest pre-rendered tray icon that covers the primary monitor's scaling (the largest if none does)
+fn tray_icon(app: &AppHandle) -> tauri::Result<Image<'static>> {
+    let scale = app.primary_monitor().ok().flatten().map(|m| m.scale_factor()).unwrap_or(1.0);
+    let want = (TRAY_ICON_BASE * scale).round() as u32;
+    let (_, bytes) = TRAY_ICONS
+        .iter()
+        .find(|(size, _)| *size >= want)
+        .unwrap_or(&TRAY_ICONS[TRAY_ICONS.len() - 1]);
+    Image::from_bytes(bytes)
+}
+
 fn create_tray(app: &AppHandle) -> tauri::Result<()> {
     let menu = Menu::with_items(
         app,
@@ -266,7 +287,8 @@ fn create_tray(app: &AppHandle) -> tauri::Result<()> {
             &MenuItem::with_id(app, TRAY_QUIT, "Kilépés", true, None::<&str>)?,
         ],
     )?;
-    let mut builder = TrayIconBuilder::with_id("forby")
+    TrayIconBuilder::with_id("forby")
+        .icon(tray_icon(app)?)
         .tooltip("FORBY")
         .menu(&menu)
         .show_menu_on_left_click(false)
@@ -288,11 +310,8 @@ fn create_tray(app: &AppHandle) -> tauri::Result<()> {
             if let TrayIconEvent::Click { button: MouseButton::Left, button_state: MouseButtonState::Up, .. } = event {
                 show_main(tray.app_handle());
             }
-        });
-    if let Some(icon) = app.default_window_icon() {
-        builder = builder.icon(icon.clone());
-    }
-    builder.build(app)?;
+        })
+        .build(app)?;
     Ok(())
 }
 
