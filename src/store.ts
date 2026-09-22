@@ -17,6 +17,10 @@ export const ALARM_TEST_EVENT = "alarm-test"; // dev only: settings window -> ma
 
 export type AlarmTest = "flash" | "toast" | "jump";
 
+// Tray menu (sent by the Rust side to the main window)
+export const TRAY_SETTINGS_EVENT = "tray-settings";
+export const TRAY_FIND_EVENT = "tray-find";
+
 export type Position = {x: number; y: number}; // main window, physical px
 
 let storePromise: Promise<Store> | null = null;

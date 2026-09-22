@@ -113,6 +113,18 @@ Időformátum: `m:ss`, egy óra fölött `h:mm:ss`, tabuláris számjegyek.
   - pomodoro-váltáskor: „Szünet következik” / „Vissza a fókuszhoz”.
 - Odaugrás (ha be van kapcsolva), csak timer lejártakor: FORBY animálva a kurzor monitorára, a kurzor közelébe ugrik (a munkaterületen belül), lezárás után visszatér az eredeti helyére. Ha közben arrébb húzod, ott marad, ahová tetted.
 
+## Indítás és tálcaikon
+
+- „Indítás a géppel” kapcsoló a „Megjelenés és időzítés” fülön, alapból be. A fő ablak induláskor és minden változáskor a beállításhoz igazítja a HKCU `Run` bejegyzést („FORBY”). Dev buildben nem regisztrálja magát. Eltávolításkor az installer törli a bejegyzést.
+- Tálcaikon (értesítési terület), „FORBY” tooltippel. Bal kattintás: FORBY előjön és fókuszt kap. Jobb kattintás menü:
+  - „Beállítások”: megnyitja a beállítás-ablakot FORBY mellett (ha nyitva van, előre hozza);
+  - „FORBY megkeresése”: a gömb közepét a fő monitor munkaterületének közepére teszi, és ott marad (egy riasztás utáni visszaugrás elmarad);
+  - „Kilépés”.
+
+## Telepítő
+
+- NSIS, felhasználói szintű telepítés (admin jog nélkül, `%LOCALAPPDATA%`).
+
 ## Fázisok
 
 1. Saját húzás, kattintás/húzás szétválasztása, dobás-fizika a határokkal, arc-reakciók (lemaradás, nyúlás, whoa, ütközés, koppintás), átkattintás az átlátszó részeken, új ablakméret. A teszt-billentyűk (1–6) maradnak.

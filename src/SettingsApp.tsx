@@ -330,6 +330,7 @@ export default function SettingsApp() {
           <Slider label="Pomodoro fókusz" unit="perc" {...POMODORO_FOCUS} value={settings.pomodoroFocusMin} onChange={(v) => update({pomodoroFocusMin: v})} />
           <Slider label="Pomodoro szünet" unit="perc" {...POMODORO_BREAK} value={settings.pomodoroBreakMin} onChange={(v) => update({pomodoroBreakMin: v})} />
           <SwitchRow label="Játék mód" checked={settings.playMode} onChange={(v) => update({playMode: v})} />
+          <SwitchRow label="Indítás a géppel" checked={settings.autostart} onChange={(v) => update({autostart: v})} />
         </section>
 
         <section className={`page${tab === "alerts" ? "" : " inactive"}`} aria-hidden={tab !== "alerts"}>

@@ -1,12 +1,23 @@
 use std::time::Duration;
 use tauri::ipc::{InvokeBody, Request, Response};
-use tauri::{AppHandle, Manager, WebviewUrl, WebviewWindow, WebviewWindowBuilder, WindowEvent};
+use tauri::menu::{Menu, MenuItem, PredefinedMenuItem};
+use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
+use tauri::{AppHandle, Emitter, Manager, WebviewUrl, WebviewWindow, WebviewWindowBuilder, WindowEvent};
+use tauri_plugin_autostart::ManagerExt;
 
 // The main window starts hidden and the frontend shows it after restoring its position.
 // Safety net: if that never happens (e.g. the frontend failed to load), show it anyway.
 const SHOW_FALLBACK: Duration = Duration::from_secs(6);
 
+const MAIN_LABEL: &str = "main";
 const SETTINGS_LABEL: &str = "settings";
+
+// Tray menu items; "Beállítások" and "FORBY megkeresése" are done by the main window (it knows the layout)
+const TRAY_SETTINGS: &str = "settings";
+const TRAY_FIND: &str = "find";
+const TRAY_QUIT: &str = "quit";
+const TRAY_SETTINGS_EVENT: &str = "tray-settings";
+const TRAY_FIND_EVENT: &str = "tray-find";
 
 // Custom alarm sound: one fixed file in the app data folder
 const SOUND_DIR: &str = "sounds";
@@ -32,7 +43,7 @@ async fn open_settings(app: AppHandle, query: String) -> Result<(), String> {
         .app
         .windows
         .iter()
-        .find(|w| w.label == "main")
+        .find(|w| w.label == MAIN_LABEL)
         .and_then(|w| w.additional_browser_args.clone());
     let url = WebviewUrl::App(format!("index.html?{query}").into());
     let mut builder = WebviewWindowBuilder::new(&app, SETTINGS_LABEL, url)
@@ -219,16 +230,84 @@ async fn show_toast(app: AppHandle, body: String) -> Result<(), String> {
     }
 }
 
+// Start with Windows (HKCU Run key). A dev build never registers itself: its exe lives in target/.
+#[tauri::command]
+fn set_autostart(app: AppHandle, enabled: bool) -> Result<(), String> {
+    if tauri::is_dev() {
+        eprintln!("[FORBY info] dev mode: autostart not changed (setting: {})", if enabled { "on" } else { "off" });
+        return Ok(());
+    }
+    let manager = app.autolaunch();
+    if enabled {
+        // Written every time, so the entry follows the exe if it moved
+        manager.enable().map_err(|e| e.to_string())
+    } else if manager.is_enabled().map_err(|e| e.to_string())? {
+        manager.disable().map_err(|e| e.to_string())
+    } else {
+        Ok(())
+    }
+}
+
+fn show_main(app: &AppHandle) {
+    if let Some(win) = app.get_webview_window(MAIN_LABEL) {
+        let _ = win.show();
+        let _ = win.unminimize();
+        let _ = win.set_focus();
+    }
+}
+
+fn create_tray(app: &AppHandle) -> tauri::Result<()> {
+    let menu = Menu::with_items(
+        app,
+        &[
+            &MenuItem::with_id(app, TRAY_SETTINGS, "Beállítások", true, None::<&str>)?,
+            &MenuItem::with_id(app, TRAY_FIND, "FORBY megkeresése", true, None::<&str>)?,
+            &PredefinedMenuItem::separator(app)?,
+            &MenuItem::with_id(app, TRAY_QUIT, "Kilépés", true, None::<&str>)?,
+        ],
+    )?;
+    let mut builder = TrayIconBuilder::with_id("forby")
+        .tooltip("FORBY")
+        .menu(&menu)
+        .show_menu_on_left_click(false)
+        .on_menu_event(|app, event| {
+            let emit = |name: &str| {
+                show_main(app);
+                if let Err(e) = app.emit_to(MAIN_LABEL, name, ()) {
+                    eprintln!("[FORBY error] tray: sending {name} failed: {e}");
+                }
+            };
+            match event.id().as_ref() {
+                TRAY_SETTINGS => emit(TRAY_SETTINGS_EVENT),
+                TRAY_FIND => emit(TRAY_FIND_EVENT),
+                TRAY_QUIT => app.exit(0),
+                _ => {}
+            }
+        })
+        .on_tray_icon_event(|tray, event| {
+            if let TrayIconEvent::Click { button: MouseButton::Left, button_state: MouseButtonState::Up, .. } = event {
+                show_main(tray.app_handle());
+            }
+        });
+    if let Some(icon) = app.default_window_icon() {
+        builder = builder.icon(icon.clone());
+    }
+    builder.build(app)?;
+    Ok(())
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_store::Builder::new().build())
+        .plugin(tauri_plugin_autostart::Builder::new().app_name("FORBY").build())
         .setup(|app| {
+            create_tray(app.handle())?;
             let handle = app.handle().clone();
             std::thread::spawn(move || {
                 std::thread::sleep(SHOW_FALLBACK);
-                if let Some(win) = handle.get_webview_window("main") {
+                if let Some(win) = handle.get_webview_window(MAIN_LABEL) {
                     if !win.is_visible().unwrap_or(true) {
                         let _ = win.show();
                     }
@@ -238,7 +317,7 @@ pub fn run() {
         })
         .on_window_event(|window, event| {
             // Closing FORBY also closes the settings window
-            if window.label() == "main" && matches!(event, WindowEvent::Destroyed) {
+            if window.label() == MAIN_LABEL && matches!(event, WindowEvent::Destroyed) {
                 window.app_handle().exit(0);
             }
         })
@@ -249,7 +328,8 @@ pub fn run() {
             read_custom_sound,
             log,
             flash_taskbar,
-            show_toast
+            show_toast,
+            set_autostart
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

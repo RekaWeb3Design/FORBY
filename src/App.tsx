@@ -1,5 +1,7 @@
 import {useCallback, useEffect, useRef, useState} from "react";
-import {getCurrentWindow} from "@tauri-apps/api/window";
+import {invoke} from "@tauri-apps/api/core";
+import {availableMonitors, getCurrentWindow, PhysicalPosition, primaryMonitor} from "@tauri-apps/api/window";
+import {workAreaOf} from "./bounds";
 import Chips from "./Chips";
 import Face from "./Face";
 import type {ChipId} from "./foby";
@@ -18,11 +20,11 @@ import {
 import {logError} from "./log";
 import {createMotion} from "./motion";
 import type {Settings} from "./prefs";
-import {writeLastDuration, writePosition} from "./store";
+import {TRAY_FIND_EVENT, writeLastDuration, writePosition} from "./store";
 import {useAlarms} from "./useAlarms";
 import {useDragFling} from "./useDragFling";
 import {useFoby, type OnTimerEvent} from "./useFoby";
-import {useSettings, useSettingsToggle} from "./useSettings";
+import {useSettings, useSettingsToggle, useWindowEvent} from "./useSettings";
 import "./App.css";
 
 const BTN_ANGLE_RAD = (SETTINGS_BTN_ANGLE * Math.PI) / 180;
@@ -81,6 +83,29 @@ function App({initialSettings, initialDurationMin}: AppProps) {
   unlockRef.current = alarms.unlockAudio;
   clickedRef.current = alarms.clicked;
   const ignoreRef = useRef<boolean | null>(null);
+
+  // Start with Windows: the registry entry follows the setting (the Rust side skips it in dev)
+  useEffect(() => {
+    invoke("set_autostart", {enabled: settings.autostart}).catch((err) => logError("changing autostart failed", err));
+  }, [settings.autostart]);
+
+  // Tray "FORBY megkeresése": the orb centre to the middle of the primary monitor's work area
+  useWindowEvent<null>(TRAY_FIND_EVENT, () => {
+    void (async () => {
+      try {
+        const mon = (await primaryMonitor()) ?? (await availableMonitors())[0];
+        if (!mon) return logError("finding FORBY: no monitor");
+        const a = workAreaOf(mon);
+        const x = Math.round((a.left + a.right) / 2 - ORB_CX * mon.scaleFactor);
+        const y = Math.round((a.top + a.bottom) / 2 - ORB_CY * mon.scaleFactor);
+        await getCurrentWindow().setPosition(new PhysicalPosition(x, y));
+        writePosition({x, y});
+        alarms.userMoved(); // no jump back after an alarm
+      } catch (err) {
+        logError("finding FORBY failed", err);
+      }
+    })();
+  });
 
   // Remember the last chosen duration
   const savedDurationRef = useRef(initialDurationMin);

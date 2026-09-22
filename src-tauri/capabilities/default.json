@@ -10,6 +10,7 @@
     "core:window:allow-set-ignore-cursor-events",
     "core:window:allow-show",
     "core:window:allow-close",
+    "core:window:allow-set-focus",
     "core:window:allow-request-user-attention",
     "store:default"
   ]

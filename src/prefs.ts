@@ -9,6 +9,7 @@ export type Settings = {
   pomodoroFocusMin: number;
   pomodoroBreakMin: number;
   playMode: boolean; // fling physics and motion face reactions
+  autostart: boolean; // start with Windows (release builds only)
   // Riasztások (used from phase 5)
   soundOn: boolean;
   sound: SoundId;
@@ -37,6 +38,7 @@ export const DEFAULT_SETTINGS: Settings = {
   pomodoroFocusMin: 25,
   pomodoroBreakMin: 5,
   playMode: true,
+  autostart: true,
   soundOn: true,
   sound: "chime",
   volume: 0.8,
@@ -65,6 +67,7 @@ export const normalizeSettings = (raw: unknown): Settings => {
     pomodoroFocusMin: stepped(r.pomodoroFocusMin, d.pomodoroFocusMin, POMODORO_FOCUS),
     pomodoroBreakMin: stepped(r.pomodoroBreakMin, d.pomodoroBreakMin, POMODORO_BREAK),
     playMode: bool(r.playMode, d.playMode),
+    autostart: bool(r.autostart, d.autostart),
     soundOn: bool(r.soundOn, d.soundOn),
     sound: SOUNDS.some((s) => s.id === r.sound) ? (r.sound as SoundId) : d.sound,
     volume: typeof r.volume === "number" && r.volume >= 0 && r.volume <= 1 ? r.volume : d.volume,

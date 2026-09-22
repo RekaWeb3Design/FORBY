@@ -5,7 +5,7 @@ import {WebviewWindow} from "@tauri-apps/api/webviewWindow";
 import {ORB_CX, ORB_CY, RING_OUTER} from "./layout";
 import {logError} from "./log";
 import {normalizeSettings, type Settings} from "./prefs";
-import {SETTINGS_CLOSED_EVENT, SETTINGS_EVENT} from "./store";
+import {SETTINGS_CLOSED_EVENT, SETTINGS_EVENT, TRAY_SETTINGS_EVENT} from "./store";
 
 export const SETTINGS_LABEL = "settings";
 // A click on the settings button right after the panel closed itself (focus loss) must not reopen it
@@ -39,19 +39,20 @@ export const useSettings = (initial: Settings) => {
   return settings;
 };
 
-// Opens the settings window next to FORBY, or closes it if it is open
+// Opens the settings window next to FORBY, or closes it if it is open.
+// The tray menu's "Beállítások" only opens it (or brings it to the front).
 export const useSettingsToggle = () => {
   const closedAtRef = useRef(0);
   useWindowEvent<null>(SETTINGS_CLOSED_EVENT, () => {closedAtRef.current = Date.now();});
 
-  return useCallback(async () => {
+  const show = useCallback(async (toggle: boolean) => {
     try {
       const existing = await WebviewWindow.getByLabel(SETTINGS_LABEL);
       if (existing) {
-        await existing.close();
+        await (toggle ? existing.close() : existing.setFocus());
         return;
       }
-      if (Date.now() - closedAtRef.current < REOPEN_GUARD_MS) return;
+      if (toggle && Date.now() - closedAtRef.current < REOPEN_GUARD_MS) return;
 
       // The settings window places itself; it gets the orb centre and the ring radius in physical px.
       // It is created on the Rust side so it shares the main window's WebView2 browser arguments.
@@ -65,7 +66,10 @@ export const useSettingsToggle = () => {
       });
       await invoke("open_settings", {query: query.toString()});
     } catch (err) {
-      logError("toggling settings failed", err);
+      logError("opening or closing settings failed", err);
     }
   }, []);
+
+  useWindowEvent<null>(TRAY_SETTINGS_EVENT, () => void show(false));
+  return useCallback(() => show(true), [show]);
 };
