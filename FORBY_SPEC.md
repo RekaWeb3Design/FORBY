@@ -67,7 +67,7 @@ Módok:
 Chipek a gömb fölött, ívben, szorosan egymás mellett, középre igazítva (szélesség a felirat alapján, 6 px rés):
 
 - pickMode: `Timer`, `Stopper`, `Cél-stopper`, `Pomodoro`
-- pickDur: `Vissza`, `5`, `15`, `25`, `45`, `60`. Chip kattintásra a kiválasztott idővel azonnal indul.
+- pickDur: `Vissza`, `Egyéni`, `5`, `15`, `25`, `45`, `60`. Számos chipre kattintva a kiválasztott idővel azonnal indul; az `Egyéni` megnyitja a beviteli mezőt, fókusszal.
 - paused: `Folytat`, `Leállít` (a Leállít → summary)
 
 Időtartam finomhangolása pickDur-ban: görgő a gömb fölött ±1 perc (1–600), vagy kattintás a számra → beviteli mező (`45`, `90`, `1:30` formátum), Enter indít, Esc bezár, hibás érték piros kerettel.

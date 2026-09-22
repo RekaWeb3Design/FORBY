@@ -1,4 +1,4 @@
-import {useCallback, useEffect, useRef} from "react";
+import {useCallback, useEffect, useRef, useState} from "react";
 import {getCurrentWindow} from "@tauri-apps/api/window";
 import Chips from "./Chips";
 import Face from "./Face";
@@ -68,9 +68,11 @@ function App({initialSettings, initialDurationMin}: AppProps) {
     clickedRef.current();
     orbClick();
   }, [orbClick]);
+  const [editRequest, setEditRequest] = useState(0);
   const onPickChip = useCallback((id: ChipId) => {
     unlockRef.current();
-    pickChip(id);
+    if (id === "custom") setEditRequest((n) => n + 1);
+    else pickChip(id);
   }, [pickChip]);
   const {activeRef, animateTo} = useDragFling(orbRef, motion, {playMode: settings.playMode, onClick: onOrbClick, onSettle});
   const alarms = useAlarms(settings, state.ui, animateTo);
@@ -135,6 +137,7 @@ function App({initialSettings, initialDurationMin}: AppProps) {
         lines={view.lines}
         editable={view.editable}
         durationMin={state.durationMin}
+        editRequest={editRequest}
         top={TIME_TOP}
         onSubmit={submitDuration}
       />

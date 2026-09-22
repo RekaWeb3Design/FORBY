@@ -5,7 +5,7 @@ import {isOvertime, pauseSession, resumeSession, snapshot, startSession, syncSes
 
 export type Ui = "idle" | "pickMode" | "pickDur" | "run" | "paused" | "alarm" | "summary";
 
-export type ChipId = Mode | "back" | "resume" | "stop" | `dur:${number}`;
+export type ChipId = Mode | "back" | "custom" | "resume" | "stop" | `dur:${number}`;
 export type Chip = {id: ChipId; label: string};
 
 export type FobyState = {
@@ -36,7 +36,11 @@ const CHIPS: Partial<Record<Ui, Chip[]>> = {
     {id: "goal", label: "Cél-stopper"},
     {id: "pomodoro", label: "Pomodoro"},
   ],
-  pickDur: [{id: "back", label: "Vissza"}, ...DURATION_CHIPS.map((m): Chip => ({id: `dur:${m}`, label: String(m)}))],
+  pickDur: [
+    {id: "back", label: "Vissza"},
+    {id: "custom", label: "Egyéni"}, // opens the duration input; handled by the UI, the state stays
+    ...DURATION_CHIPS.map((m): Chip => ({id: `dur:${m}`, label: String(m)})),
+  ],
   paused: [{id: "resume", label: "Folytat"}, {id: "stop", label: "Leállít"}],
 };
 

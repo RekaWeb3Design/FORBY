@@ -7,12 +7,13 @@ type TimeTextProps = {
   lines: string[];
   editable: boolean;
   durationMin: number;
+  editRequest: number; // incremented to open the input from outside (the "Egyéni" chip)
   top: number; // window px
   onSubmit: (minutes: number) => void;
 };
 
 // Time and helper lines in a light pill below the orb. In pickDur the number opens a duration input.
-export default function TimeText({big, alert, lines, editable, durationMin, top, onSubmit}: TimeTextProps) {
+export default function TimeText({big, alert, lines, editable, durationMin, editRequest, top, onSubmit}: TimeTextProps) {
   const [editing, setEditing] = useState(false);
   const [value, setValue] = useState("");
   const [error, setError] = useState(false);
@@ -21,14 +22,19 @@ export default function TimeText({big, alert, lines, editable, durationMin, top,
     if (!editable) setEditing(false);
   }, [editable]);
 
-  if (big === null && !lines.length) return null;
-
   const open = () => {
     if (!editable) return;
     setValue(String(durationMin));
     setError(false);
     setEditing(true);
   };
+
+  // Opened from outside: the input mounts with autoFocus
+  useEffect(() => {
+    if (editRequest) open();
+  }, [editRequest]);
+
+  if (big === null && !lines.length) return null;
 
   const onKey = (e: KeyboardEvent<HTMLInputElement>) => {
     if (e.key === "Escape") setEditing(false);
