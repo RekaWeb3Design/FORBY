@@ -3,6 +3,7 @@
 import {invoke} from "@tauri-apps/api/core";
 import {load, type Store} from "@tauri-apps/plugin-store";
 import {DURATION_MAX, DURATION_MIN} from "./format";
+import {logError} from "./log";
 import {normalizeSettings, type Settings} from "./prefs";
 
 const STORE_FILE = "forby.json";
@@ -12,6 +13,9 @@ const AUTOSAVE_MS = 200;
 export const SETTINGS_EVENT = "settings-changed";
 export const SETTINGS_CLOSED_EVENT = "settings-closed";
 export const CUSTOM_SOUND_EVENT = "custom-sound-changed";
+export const ALARM_TEST_EVENT = "alarm-test"; // dev only: settings window -> main window
+
+export type AlarmTest = "flash" | "toast" | "jump";
 
 export type Position = {x: number; y: number}; // main window, physical px
 
@@ -27,7 +31,7 @@ const getStore = () => {
 const write = (key: string, value: unknown) => {
   getStore()
     .then((store) => store.set(key, value))
-    .catch((err) => console.error(`FORBY: saving "${key}" failed`, err));
+    .catch((err) => logError(`saving "${key}" failed`, err));
 };
 
 export const readSettings = async (): Promise<Settings> => normalizeSettings(await (await getStore()).get("settings"));

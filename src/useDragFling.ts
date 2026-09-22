@@ -1,6 +1,7 @@
 import {useCallback, useEffect, useRef, type RefObject} from "react";
 import {availableMonitors, cursorPosition, getCurrentWindow, PhysicalPosition} from "@tauri-apps/api/window";
 import {orbLimits, workAreaOf, type Area} from "./bounds";
+import {logError} from "./log";
 import type {Motion} from "./motion";
 
 // Click vs drag
@@ -67,7 +68,7 @@ export const useDragFling = (
     const warn = (msg: string, err: unknown) => {
       if (warned) return;
       warned = true;
-      console.error(`FORBY: ${msg}`, err);
+      logError(msg, err);
     };
 
     // Cached scale factor and monitor work areas, refreshed regularly (mixed-DPI setups)

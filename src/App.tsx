@@ -15,6 +15,7 @@ import {
   SETTINGS_BTN_SIZE,
   TIME_TOP,
 } from "./layout";
+import {logError} from "./log";
 import {createMotion} from "./motion";
 import type {Settings} from "./prefs";
 import {writeLastDuration, writePosition} from "./store";
@@ -60,9 +61,11 @@ function App({initialSettings, initialDurationMin}: AppProps) {
     userMovedRef.current();
   }, []);
   const unlockRef = useRef<() => void>(() => {});
-  // Clicks are user gestures: use them to (re)unlock audio as well
+  const clickedRef = useRef<() => void>(() => {});
+  // Clicks are user gestures: use them to (re)unlock audio as well; a click also stops the soft flashing
   const onOrbClick = useCallback(() => {
     unlockRef.current();
+    clickedRef.current();
     orbClick();
   }, [orbClick]);
   const onPickChip = useCallback((id: ChipId) => {
@@ -74,6 +77,7 @@ function App({initialSettings, initialDurationMin}: AppProps) {
   timerEventRef.current = alarms.onEvent;
   userMovedRef.current = alarms.userMoved;
   unlockRef.current = alarms.unlockAudio;
+  clickedRef.current = alarms.clicked;
   const ignoreRef = useRef<boolean | null>(null);
 
   // Remember the last chosen duration
@@ -90,7 +94,7 @@ function App({initialSettings, initialDurationMin}: AppProps) {
     ignoreRef.current = ignore;
     getCurrentWindow().setIgnoreCursorEvents(ignore).catch((err) => {
       ignoreRef.current = null;
-      console.error("FORBY: setIgnoreCursorEvents failed", err);
+      logError("setIgnoreCursorEvents failed", err);
     });
   }, [activeRef]);
 

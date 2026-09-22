@@ -3,6 +3,7 @@ import {invoke} from "@tauri-apps/api/core";
 import {getCurrentWindow} from "@tauri-apps/api/window";
 import {WebviewWindow} from "@tauri-apps/api/webviewWindow";
 import {ORB_CX, ORB_CY, RING_OUTER} from "./layout";
+import {logError} from "./log";
 import {normalizeSettings, type Settings} from "./prefs";
 import {SETTINGS_CLOSED_EVENT, SETTINGS_EVENT} from "./store";
 
@@ -23,7 +24,7 @@ export const useWindowEvent = <T>(name: string, handler: (payload: T) => void) =
         if (disposed) un();
         else unlisten = un;
       })
-      .catch((err) => console.error(`FORBY: listening to ${name} failed`, err));
+      .catch((err) => logError(`listening to ${name} failed`, err));
     return () => {
       disposed = true;
       unlisten?.();
@@ -64,7 +65,7 @@ export const useSettingsToggle = () => {
       });
       await invoke("open_settings", {query: query.toString()});
     } catch (err) {
-      console.error("FORBY: toggling settings failed", err);
+      logError("toggling settings failed", err);
     }
   }, []);
 };

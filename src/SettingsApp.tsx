@@ -2,6 +2,7 @@ import {useCallback, useEffect, useRef, useState, type ReactNode} from "react";
 import {emitTo} from "@tauri-apps/api/event";
 import {availableMonitors, getCurrentWindow, LogicalSize, PhysicalPosition} from "@tauri-apps/api/window";
 import {nearestAreaIndex, workAreaOf} from "./bounds";
+import {logError} from "./log";
 import {
   COLOR_PRESETS,
   DEFAULT_SETTINGS,
@@ -13,6 +14,7 @@ import {
 } from "./prefs";
 import {CUSTOM_EXTS, CUSTOM_MAX_BYTES, CUSTOM_MAX_SEC, decodeSound, playSound} from "./sounds";
 import {
+  ALARM_TEST_EVENT,
   CUSTOM_SOUND_EVENT,
   loadCustomSound,
   readCustomSoundInfo,
@@ -22,6 +24,7 @@ import {
   SETTINGS_EVENT,
   writeCustomSoundInfo,
   writeSettings,
+  type AlarmTest,
   type CustomSoundInfo,
 } from "./store";
 import "./Settings.css";
@@ -33,6 +36,16 @@ const RECORD_MAX_SEC = 5;
 const RECORD_MIME = "audio/webm;codecs=opus";
 
 type Tab = "look" | "alerts";
+
+// Dev only: fire each signal in the main window right away; the jump waits 3 s so the cursor can move away
+const ALARM_TESTS: {id: AlarmTest; label: string}[] = [
+  {id: "flash", label: "Villogás"},
+  {id: "toast", label: "Értesítés"},
+  {id: "jump", label: "Odaugrás"},
+];
+const sendTest = (test: AlarmTest) => {
+  emitTo(MAIN_LABEL, ALARM_TEST_EVENT, test).catch((err) => logError("sending the alarm test failed", err));
+};
 
 // Place the window next to FORBY's ring (right, or left if it does not fit), inside the work area, then show it
 const placeAndShow = async (w: number, h: number) => {
@@ -59,9 +72,9 @@ const placeAndShow = async (w: number, h: number) => {
     }
     await win.setSize(new LogicalSize(w, h));
   } catch (err) {
-    console.error("FORBY: placing the settings window failed", err);
+    logError("placing the settings window failed", err);
   } finally {
-    await win.show().catch((err) => console.error("FORBY: showing settings failed", err));
+    await win.show().catch((err) => logError("showing settings failed", err));
     await win.setFocus().catch(() => {});
   }
 };
@@ -112,13 +125,13 @@ export default function SettingsApp() {
   useEffect(() => {
     readSettings()
       .catch((err) => {
-        console.error("FORBY: loading settings failed", err);
+        logError("loading settings failed", err);
         return DEFAULT_SETTINGS;
       })
       .then(setSettings);
     readCustomSoundInfo()
       .then(setCustomInfo)
-      .catch((err) => console.error("FORBY: loading custom sound info failed", err));
+      .catch((err) => logError("loading custom sound info failed", err));
   }, []);
 
   // Once rendered, size the window to the panel (the taller tab sets the height) and show it
@@ -135,7 +148,7 @@ export default function SettingsApp() {
     closingRef.current = true;
     recorderRef.current?.stop();
     await emitTo(MAIN_LABEL, SETTINGS_CLOSED_EVENT, null).catch(() => {});
-    await getCurrentWindow().close().catch((err) => console.error("FORBY: closing settings failed", err));
+    await getCurrentWindow().close().catch((err) => logError("closing settings failed", err));
   }, []);
 
   // Close on Esc and when focus goes elsewhere (clicking beside the panel), but not while a native dialog is open
@@ -163,7 +176,7 @@ export default function SettingsApp() {
         if (disposed) un();
         else unlisten = un;
       })
-      .catch((err) => console.error("FORBY: focus listener failed", err));
+      .catch((err) => logError("focus listener failed", err));
     return () => {
       disposed = true;
       window.removeEventListener("keydown", onKey);
@@ -178,7 +191,7 @@ export default function SettingsApp() {
     const next = {...settings, ...patch};
     setSettings(next);
     writeSettings(next);
-    emitTo(MAIN_LABEL, SETTINGS_EVENT, next).catch((err) => console.error("FORBY: sending settings failed", err));
+    emitTo(MAIN_LABEL, SETTINGS_EVENT, next).catch((err) => logError("sending settings failed", err));
   };
 
   const customColor = !COLOR_PRESETS.includes(settings.color);
@@ -193,7 +206,7 @@ export default function SettingsApp() {
       const custom = bytes && bytes.byteLength ? await decodeSound(bytes) : null;
       playSound(ctx, settings.sound, settings.volume, custom);
     } catch (err) {
-      console.error("FORBY: preview failed", err);
+      logError("preview failed", err);
       setSoundError("A hang nem játszható le");
     }
   };
@@ -211,14 +224,14 @@ export default function SettingsApp() {
     try {
       await saveCustomSound(bytes, ext);
     } catch (err) {
-      console.error("FORBY: saving the custom sound failed", err);
+      logError("saving the custom sound failed", err);
       return setSoundError("A mentés nem sikerült");
     }
     const info = {name, durationSec: Math.round(buffer.duration * 10) / 10};
     writeCustomSoundInfo(info);
     setCustomInfo(info);
     setSoundError(null);
-    emitTo(MAIN_LABEL, CUSTOM_SOUND_EVENT, null).catch((err) => console.error("FORBY: sending sound change failed", err));
+    emitTo(MAIN_LABEL, CUSTOM_SOUND_EVENT, null).catch((err) => logError("sending sound change failed", err));
     update({sound: "custom"});
   };
 
@@ -233,7 +246,7 @@ export default function SettingsApp() {
       pickerOpenRef.current = true;
       stream = await navigator.mediaDevices.getUserMedia({audio: true});
     } catch (err) {
-      console.error("FORBY: microphone access failed", err);
+      logError("microphone access failed", err);
       return setSoundError("Nincs hozzáférés a mikrofonhoz");
     } finally {
       pickerOpenRef.current = false;
@@ -256,7 +269,7 @@ export default function SettingsApp() {
       if (closingRef.current) return;
       new Blob(chunks, {type: mimeType}).arrayBuffer()
         .then((bytes) => acceptSound(bytes, "webm", "Felvétel"))
-        .catch((err) => console.error("FORBY: reading the recording failed", err));
+        .catch((err) => logError("reading the recording failed", err));
     };
     recorderRef.current = recorder;
     setSoundError(null);
@@ -354,6 +367,14 @@ export default function SettingsApp() {
           <SwitchRow label="Tálca-villogás" checked={settings.flashTaskbar} onChange={(v) => update({flashTaskbar: v})} />
           <SwitchRow label="Windows értesítés" checked={settings.notification} onChange={(v) => update({notification: v})} />
           <SwitchRow label="Odaugrik a kurzorhoz" checked={settings.jumpToCursor} onChange={(v) => update({jumpToCursor: v})} />
+          {import.meta.env.DEV && (
+            <div className="field">
+              <span className="row-label">Teszt (csak fejlesztői módban)</span>
+              <div className="buttons">
+                {ALARM_TESTS.map(({id, label}) => <button key={id} className="btn" onClick={() => sendTest(id)}>{label}</button>)}
+              </div>
+            </div>
+          )}
         </section>
       </div>
     </div>

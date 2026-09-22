@@ -3,6 +3,7 @@ import ReactDOM from "react-dom/client";
 import {availableMonitors, getCurrentWindow, PhysicalPosition, primaryMonitor} from "@tauri-apps/api/window";
 import {containsPoint, workAreaOf} from "./bounds";
 import {CONTENT_BOTTOM, CONTENT_RIGHT, DEFAULT_MARGIN, ORB_CX, ORB_CY} from "./layout";
+import {logError} from "./log";
 import {DEFAULT_DURATION_MIN, DEFAULT_SETTINGS} from "./prefs";
 import {readLastDuration, readPosition, readSettings, type Position} from "./store";
 
@@ -57,16 +58,16 @@ const bootMain = async () => {
     durationMin = lastDuration ?? DEFAULT_DURATION_MIN;
     await withTimeout(placeSaved(pos), RESTORE_TIMEOUT_MS);
   } catch (err) {
-    console.error("FORBY: restoring settings or position failed, using defaults", err);
+    logError("restoring settings or position failed, using defaults", err);
     settings = DEFAULT_SETTINGS;
     durationMin = DEFAULT_DURATION_MIN;
     try {
       await withTimeout(placeDefault(), RESTORE_TIMEOUT_MS);
     } catch (placeErr) {
-      console.error("FORBY: default placement failed", placeErr);
+      logError("default placement failed", placeErr);
     }
   } finally {
-    win.show().catch((err) => console.error("FORBY: showing the window failed", err));
+    win.show().catch((err) => logError("showing the window failed", err));
     const {default: App} = await appModule;
     render(<App initialSettings={settings} initialDurationMin={durationMin} />);
   }

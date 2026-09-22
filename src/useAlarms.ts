@@ -1,13 +1,14 @@
 import {useCallback, useEffect, useRef} from "react";
-import {availableMonitors, cursorPosition, getCurrentWindow, UserAttentionType} from "@tauri-apps/api/window";
-import {isPermissionGranted, requestPermission, sendNotification} from "@tauri-apps/plugin-notification";
+import {invoke} from "@tauri-apps/api/core";
+import {availableMonitors, cursorPosition, getCurrentWindow} from "@tauri-apps/api/window";
 import {containsPoint, nearestAreaIndex, workAreaOf} from "./bounds";
 import type {Ui} from "./foby";
 import {formatMinutes} from "./format";
 import {CONTENT_BOTTOM, ORB_CX, ORB_CY, RING_OUTER} from "./layout";
+import {logError, logInfo} from "./log";
 import type {Settings} from "./prefs";
 import {createAudio, decodeSound, playSound} from "./sounds";
-import {CUSTOM_SOUND_EVENT, loadCustomSound} from "./store";
+import {ALARM_TEST_EVENT, CUSTOM_SOUND_EVENT, loadCustomSound, type AlarmTest} from "./store";
 import type {AnimateTo} from "./useDragFling";
 import type {OnTimerEvent} from "./useFoby";
 import {useWindowEvent} from "./useSettings";
@@ -23,17 +24,25 @@ const JUMP_SKIP_DIST = 200; // already this close: no jump
 const JUMP_MARGIN = RING_OUTER + 6; // orb centre to the work area edge (left, right, top)
 const JUMP_MARGIN_BOTTOM = CONTENT_BOTTOM - ORB_CY + 6; // the time pill below must fit too
 
+// Dev test buttons in the settings window
+const TEST_FLASH_MS = 5000;
+const TEST_JUMP_DELAY_MS = 3000; // time to move the cursor away from the settings window
+const TEST_JUMP_HOLD_MS = 3000; // then it jumps back
+
 type Jump = {origin: {x: number; y: number}; userMoved: boolean};
 
+// Windows toast, sent by the Rust side (errors come back and are logged)
 const notify = async (body: string) => {
   try {
-    let granted = await isPermissionGranted();
-    if (!granted) granted = (await requestPermission()) === "granted";
-    if (granted) sendNotification({title: "FORBY", body});
+    await invoke("show_toast", {body});
+    logInfo(`toast sent: "${body}"`);
   } catch (err) {
-    console.error("FORBY: notification failed", err);
+    logError("toast failed", err);
   }
 };
+
+const setFlash = (on: boolean) =>
+  invoke("flash_taskbar", {on}).catch((err) => logError(on ? "taskbar flash failed" : "stopping flash failed", err));
 
 // Alarms in the main window: sounds, toast, taskbar flashing and the jump to the cursor
 export const useAlarms = (settings: Settings, ui: Ui, animateTo: AnimateTo) => {
@@ -51,7 +60,7 @@ export const useAlarms = (settings: Settings, ui: Ui, animateTo: AnimateTo) => {
       customRef.current = bytes.byteLength ? await decodeSound(bytes) : null;
     } catch (err) {
       customRef.current = null;
-      console.error("FORBY: loading the custom sound failed", err);
+      logError("loading the custom sound failed", err);
     }
   }, []);
   useEffect(() => {void loadCustom();}, [loadCustom]);
@@ -64,24 +73,26 @@ export const useAlarms = (settings: Settings, ui: Ui, animateTo: AnimateTo) => {
       const ctx = await audioRef.current.get();
       playSound(ctx, s.sound, s.volume * share, customRef.current);
     } catch (err) {
-      console.error("FORBY: playing the alarm failed", err);
+      logError("playing the alarm failed", err);
     }
   }, []);
 
-  // Taskbar flashing
+  // Taskbar flashing; a soft one stops by itself after softMs
   const stopFlash = useCallback(() => {
     if (softFlashRef.current !== null) clearTimeout(softFlashRef.current);
     softFlashRef.current = null;
-    getCurrentWindow().requestUserAttention(null).catch((err) => console.error("FORBY: stopping flash failed", err));
+    void setFlash(false);
   }, []);
+  const startFlash = useCallback((softMs: number | null) => {
+    void setFlash(true);
+    if (softFlashRef.current !== null) clearTimeout(softFlashRef.current);
+    softFlashRef.current = softMs === null ? null : window.setTimeout(stopFlash, softMs);
+  }, [stopFlash]);
   const flash = useCallback((soft: boolean) => {
     if (!settingsRef.current.flashTaskbar) return;
-    getCurrentWindow()
-      .requestUserAttention(UserAttentionType.Critical)
-      .catch((err) => console.error("FORBY: taskbar flash failed", err));
-    if (softFlashRef.current !== null) clearTimeout(softFlashRef.current);
-    softFlashRef.current = soft ? window.setTimeout(stopFlash, SOFT_FLASH_MS) : null;
-  }, [stopFlash]);
+    startFlash(soft ? SOFT_FLASH_MS : null);
+    logInfo(`taskbar flashing${soft ? " (soft)" : ""}`);
+  }, [startFlash]);
 
   // Goal and pomodoro flashing stops when FORBY gets focus (a click on it focuses it too)
   useEffect(() => {
@@ -95,24 +106,28 @@ export const useAlarms = (settings: Settings, ui: Ui, animateTo: AnimateTo) => {
         if (disposed) un();
         else unlisten = un;
       })
-      .catch((err) => console.error("FORBY: focus listener failed", err));
+      .catch((err) => logError("focus listener failed", err));
     return () => {
       disposed = true;
       unlisten?.();
     };
   }, [stopFlash]);
 
-  // Jump next to the cursor on its monitor, keeping the orb, ring and time inside the work area
-  const jump = useCallback(async () => {
+  // Jump next to the cursor on its monitor, keeping the orb, ring and time inside the work area.
+  // force: also when the cursor is already close (test button)
+  const jump = useCallback(async (force = false) => {
     try {
       const win = getCurrentWindow();
       const [pos, scale, cursor, monitors] = await Promise.all([
         win.outerPosition(), win.scaleFactor(), cursorPosition(), availableMonitors(),
       ]);
-      if (Math.hypot(cursor.x - (pos.x + ORB_CX * scale), cursor.y - (pos.y + ORB_CY * scale)) < JUMP_SKIP_DIST * scale) return;
+      const dist = Math.hypot(cursor.x - (pos.x + ORB_CX * scale), cursor.y - (pos.y + ORB_CY * scale)) / scale;
+      if (!force && dist < JUMP_SKIP_DIST) {
+        return logInfo(`jump skipped: the cursor is ${Math.round(dist)} px from the orb (jumps only beyond ${JUMP_SKIP_DIST} px)`);
+      }
       const areas = monitors.map(workAreaOf);
       const i = nearestAreaIndex(areas, cursor.x, cursor.y);
-      if (i < 0) return;
+      if (i < 0) return logError("jump skipped: no monitor found");
       const a = areas[i];
       const s = monitors[i].scaleFactor;
       let cx = cursor.x + JUMP_OFFSET * s;
@@ -120,9 +135,10 @@ export const useAlarms = (settings: Settings, ui: Ui, animateTo: AnimateTo) => {
       cx = Math.min(Math.max(cx, a.left + JUMP_MARGIN * s), a.right - JUMP_MARGIN * s);
       const cy = Math.min(Math.max(cursor.y - JUMP_OFFSET * s, a.top + JUMP_MARGIN * s), a.bottom - JUMP_MARGIN_BOTTOM * s);
       jumpRef.current = {origin: {x: pos.x, y: pos.y}, userMoved: false};
-      await animateTo(cx - ORB_CX * s, cy - ORB_CY * s, JUMP_MS);
+      const done = await animateTo(cx - ORB_CX * s, cy - ORB_CY * s, JUMP_MS);
+      logInfo(done ? "jumped to the cursor" : "jump interrupted (FORBY was being dragged or thrown)");
     } catch (err) {
-      console.error("FORBY: jump to cursor failed", err);
+      logError("jump to cursor failed", err);
     }
   }, [animateTo]);
 
@@ -130,14 +146,16 @@ export const useAlarms = (settings: Settings, ui: Ui, animateTo: AnimateTo) => {
   const jumpBack = useCallback(async () => {
     const j = jumpRef.current;
     jumpRef.current = null;
-    if (!j || j.userMoved) return;
+    if (!j) return;
+    if (j.userMoved) return logInfo("no jump back: FORBY was moved meanwhile");
     try {
       const monitors = await availableMonitors();
       const visible = monitors.some((m) =>
         containsPoint(workAreaOf(m), j.origin.x + ORB_CX * m.scaleFactor, j.origin.y + ORB_CY * m.scaleFactor));
       if (visible) await animateTo(j.origin.x, j.origin.y, JUMP_MS);
+      else logInfo("no jump back: the original place is no longer on a monitor");
     } catch (err) {
-      console.error("FORBY: jumping back failed", err);
+      logError("jumping back failed", err);
     }
   }, [animateTo]);
 
@@ -146,6 +164,7 @@ export const useAlarms = (settings: Settings, ui: Ui, animateTo: AnimateTo) => {
   useEffect(() => {
     if (!isAlarm) return;
     const s = settingsRef.current;
+    logInfo(`timer alarm (flash ${s.flashTaskbar ? "on" : "off"}, toast ${s.notification ? "on" : "off"}, jump ${s.jumpToCursor ? "on" : "off"})`);
     void play();
     const repeat = window.setInterval(() => void play(), ALARM_REPEAT_MS);
     flash(false);
@@ -160,6 +179,7 @@ export const useAlarms = (settings: Settings, ui: Ui, animateTo: AnimateTo) => {
 
   const onEvent = useCallback<OnTimerEvent>((event, snap, session) => {
     const s = settingsRef.current;
+    logInfo(`${event} (flash ${s.flashTaskbar ? "on" : "off"}, toast ${s.notification ? "on" : "off"})`);
     if (event === "goalLap") {
       void play();
       if (snap.goalLaps !== 1) return;
@@ -173,8 +193,25 @@ export const useAlarms = (settings: Settings, ui: Ui, animateTo: AnimateTo) => {
     }
   }, [play, flash]);
 
+  // Dev test buttons: each signal right away, whatever the settings say
+  useWindowEvent<AlarmTest>(ALARM_TEST_EVENT, (test) => {
+    logInfo(`test: ${test}`);
+    if (test === "flash") startFlash(TEST_FLASH_MS);
+    if (test === "toast") void notify("Teszt értesítés");
+    if (test === "jump") {
+      window.setTimeout(async () => {
+        await jump(true);
+        window.setTimeout(() => void jumpBack(), TEST_JUMP_HOLD_MS);
+      }, TEST_JUMP_DELAY_MS);
+    }
+  });
+
   return {
     onEvent,
+    // A click on FORBY stops the goal / pomodoro flashing (a focus change alone misses it if FORBY was already active)
+    clicked: useCallback(() => {
+      if (softFlashRef.current !== null) stopFlash();
+    }, [stopFlash]),
     // A user gesture (click on the orb): lets audio run even if autoplay were blocked
     unlockAudio: useCallback(() => audioRef.current.unlock(), []),
     // The user moved FORBY: it stays there after the alarm

@@ -1,5 +1,6 @@
 import {useEffect, useId, useMemo, useRef, useState, type ReactNode, type RefObject} from "react";
 import {cursorPosition, getCurrentWindow} from "@tauri-apps/api/window";
+import {logError} from "./log";
 import type {Motion} from "./motion";
 
 export type FaceState = "idle" | "focus" | "pause" | "break" | "alarm" | "overtime";
@@ -251,7 +252,7 @@ export default function Face({state, color = DEFAULT_COLOR, readingAnimation = f
         extRef.current.onCursor?.((cursor.x - inner.x) / scale, (cursor.y - inner.y) / scale);
       } catch (err) {
         if (!warned) {
-          console.error("FORBY: cursor tracking failed", err);
+          logError("cursor tracking failed", err);
           warned = true;
         }
         lookRef.current = {yaw: 0, pitch: 0};
