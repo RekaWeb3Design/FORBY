@@ -6,7 +6,7 @@ import {containsPoint, workAreaOf} from "./bounds";
 import {CONTENT_BOTTOM, CONTENT_RIGHT, DEFAULT_MARGIN, ORB_CX, ORB_CY} from "./layout";
 import {logError, logInfo} from "./log";
 import {DEFAULT_DURATION_MIN, DEFAULT_SETTINGS} from "./prefs";
-import {readLastDuration, readPosition, readSettings, type Position} from "./store";
+import {migrateSounds, readLastDuration, readPosition, readSettings, type Position} from "./store";
 
 // Upper bound for restoring at startup; after this FORBY shows up with defaults anyway
 const RESTORE_TIMEOUT_MS = 3000;
@@ -52,7 +52,9 @@ const bootMain = async () => {
   let durationMin = DEFAULT_DURATION_MIN;
   try {
     const [saved, lastDuration, pos] = await withTimeout(
-      Promise.all([readSettings(), readLastDuration(), readPosition()]),
+      migrateSounds()
+        .catch((err) => logError("migrating the sound settings failed", err))
+        .then(() => Promise.all([readSettings(), readLastDuration(), readPosition()])),
       RESTORE_TIMEOUT_MS,
     );
     settings = saved;
@@ -71,7 +73,7 @@ const bootMain = async () => {
     const on = (v: boolean) => (v ? "on" : "off");
     getVersion()
       .catch(() => "?")
-      .then((v) => logInfo(`FORBY ${v} started (flash ${on(settings.flashTaskbar)}, toast ${on(settings.notification)}, jump ${on(settings.jumpToCursor)}, sound ${settings.soundOn ? settings.sound : "off"})`));
+      .then((v) => logInfo(`FORBY ${v} started (flash ${on(settings.flashTaskbar)}, toast ${on(settings.notification)}, jump ${on(settings.jumpToCursor)}, sound ${settings.soundOn ? Object.entries(settings.sounds).map(([k, v]) => `${k}:${v}`).join(" ") : "off"})`));
     win.show().catch((err) => logError("showing the window failed", err));
     const {default: App} = await appModule;
     render(<App initialSettings={settings} initialDurationMin={durationMin} />);

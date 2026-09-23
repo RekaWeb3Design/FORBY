@@ -29,11 +29,13 @@ const TRAY_ICONS: [(u32, &[u8]); 4] = [
     (32, include_bytes!("../icons/source/tray-32.png")),
 ];
 
-// Custom alarm sound: one fixed file in the app data folder
+// Custom sound library: "<id>.<ext>" files in the app data folder
 const SOUND_DIR: &str = "sounds";
-const SOUND_STEM: &str = "custom";
+const LEGACY_SOUND_STEM: &str = "custom"; // the single custom sound of 0.1.x
 const SOUND_EXTS: [&str; 5] = ["webm", "ogg", "mp3", "wav", "m4a"];
 const SOUND_MAX_BYTES: usize = 5 * 1024 * 1024;
+const SOUND_MAX_COUNT: usize = 8;
+const SOUND_ID_MAX: usize = 16;
 
 // Learn more about Tauri commands at https://tauri.app/develop/calling-rust/
 #[tauri::command]
@@ -77,47 +79,116 @@ fn sound_dir(app: &AppHandle) -> Result<std::path::PathBuf, String> {
     Ok(app.path().app_data_dir().map_err(|e| e.to_string())?.join(SOUND_DIR))
 }
 
-fn find_custom_sound(app: &AppHandle) -> Result<Option<std::path::PathBuf>, String> {
+fn valid_sound_id(id: &str) -> bool {
+    !id.is_empty() && id.len() <= SOUND_ID_MAX && id.bytes().all(|b| b.is_ascii_lowercase() || b.is_ascii_digit())
+}
+
+fn find_sound(app: &AppHandle, stem: &str) -> Result<Option<std::path::PathBuf>, String> {
     let dir = sound_dir(app)?;
     Ok(SOUND_EXTS
         .iter()
-        .map(|ext| dir.join(format!("{SOUND_STEM}.{ext}")))
+        .map(|ext| dir.join(format!("{stem}.{ext}")))
         .find(|p| p.is_file()))
 }
 
-// Raw bytes in the body, the file extension in the "x-ext" header
+// Ids of the saved library sounds (file stems in the sound folder, the legacy file excluded)
+fn sound_ids(app: &AppHandle) -> Result<Vec<String>, String> {
+    let Ok(entries) = std::fs::read_dir(sound_dir(app)?) else {
+        return Ok(Vec::new());
+    };
+    let mut ids: Vec<String> = entries
+        .filter_map(|e| e.ok())
+        .map(|e| e.path())
+        .filter(|p| {
+            p.extension()
+                .and_then(|x| x.to_str())
+                .is_some_and(|x| SOUND_EXTS.contains(&x))
+        })
+        .filter_map(|p| p.file_stem().and_then(|s| s.to_str()).map(str::to_owned))
+        .filter(|s| s != LEGACY_SOUND_STEM && valid_sound_id(s))
+        .collect();
+    ids.sort();
+    ids.dedup();
+    Ok(ids)
+}
+
+fn header(request: &Request<'_>, name: &str) -> String {
+    request
+        .headers()
+        .get(name)
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or_default()
+        .to_ascii_lowercase()
+}
+
+// Raw bytes in the body, the sound id in the "x-id" and the file extension in the "x-ext" header
 #[tauri::command]
-fn save_custom_sound(app: AppHandle, request: Request<'_>) -> Result<(), String> {
+fn save_sound(app: AppHandle, request: Request<'_>) -> Result<(), String> {
     let InvokeBody::Raw(data) = request.body() else {
         return Err("expected raw audio bytes".into());
     };
-    let ext = request
-        .headers()
-        .get("x-ext")
-        .and_then(|v| v.to_str().ok())
-        .unwrap_or_default()
-        .to_ascii_lowercase();
+    let id = header(&request, "x-id");
+    let ext = header(&request, "x-ext");
+    if !valid_sound_id(&id) || id == LEGACY_SOUND_STEM {
+        return Err(format!("invalid sound id: {id}"));
+    }
     if !SOUND_EXTS.contains(&ext.as_str()) {
         return Err(format!("unsupported file type: {ext}"));
     }
     if data.is_empty() || data.len() > SOUND_MAX_BYTES {
         return Err(format!("file size must be 1 byte to {} MB", SOUND_MAX_BYTES / 1024 / 1024));
     }
+    let ids = sound_ids(&app)?;
+    if !ids.contains(&id) && ids.len() >= SOUND_MAX_COUNT {
+        return Err(format!("at most {SOUND_MAX_COUNT} custom sounds"));
+    }
     let dir = sound_dir(&app)?;
     std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
-    while let Some(old) = find_custom_sound(&app)? {
+    while let Some(old) = find_sound(&app, &id)? {
         std::fs::remove_file(old).map_err(|e| e.to_string())?;
     }
-    std::fs::write(dir.join(format!("{SOUND_STEM}.{ext}")), data).map_err(|e| e.to_string())
+    std::fs::write(dir.join(format!("{id}.{ext}")), data).map_err(|e| e.to_string())
 }
 
-// The saved sound's bytes, or an empty body if there is none
+// The sound's bytes, or an empty body if there is none
 #[tauri::command]
-fn read_custom_sound(app: AppHandle) -> Result<Response, String> {
-    match find_custom_sound(&app)? {
+fn read_sound(app: AppHandle, id: String) -> Result<Response, String> {
+    if !valid_sound_id(&id) {
+        return Err(format!("invalid sound id: {id}"));
+    }
+    match find_sound(&app, &id)? {
         Some(path) => std::fs::read(path).map(Response::new).map_err(|e| e.to_string()),
         None => Ok(Response::new(Vec::new())),
     }
+}
+
+#[tauri::command]
+fn delete_sound(app: AppHandle, id: String) -> Result<(), String> {
+    if !valid_sound_id(&id) {
+        return Err(format!("invalid sound id: {id}"));
+    }
+    while let Some(path) = find_sound(&app, &id)? {
+        std::fs::remove_file(path).map_err(|e| e.to_string())?;
+    }
+    Ok(())
+}
+
+// 0.1.1 -> 0.2.0: the single custom sound ("custom.<ext>") becomes the library sound `id`.
+// Safe to repeat: if `id` already exists, nothing moves. Returns whether the sound exists.
+#[tauri::command]
+fn migrate_legacy_sound(app: AppHandle, id: String) -> Result<bool, String> {
+    if !valid_sound_id(&id) || id == LEGACY_SOUND_STEM {
+        return Err(format!("invalid sound id: {id}"));
+    }
+    if find_sound(&app, &id)?.is_some() {
+        return Ok(true);
+    }
+    let Some(old) = find_sound(&app, LEGACY_SOUND_STEM)? else {
+        return Ok(false);
+    };
+    let ext = old.extension().and_then(|x| x.to_str()).unwrap_or_default().to_owned();
+    std::fs::rename(&old, sound_dir(&app)?.join(format!("{id}.{ext}"))).map_err(|e| e.to_string())?;
+    Ok(true)
 }
 
 // Log lines: "<local time> [FORBY <level>] <message>", to the terminal running `tauri dev` and to
@@ -392,8 +463,10 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             greet,
             open_settings,
-            save_custom_sound,
-            read_custom_sound,
+            save_sound,
+            read_sound,
+            delete_sound,
+            migrate_legacy_sound,
             log,
             flash_taskbar,
             show_toast,

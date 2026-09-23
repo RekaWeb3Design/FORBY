@@ -1,9 +1,12 @@
-// Alarm sounds: synthesised with Web Audio (prototype recipes) or the saved custom sound.
-import type {SoundId} from "./prefs";
+// Alarm sounds: synthesised with Web Audio (prototype recipes) or a custom sound from the library.
+import {FALLBACK_SOUND, type AlarmEvent, type BuiltinSound, type SoundRef} from "./prefs";
 
 export const CUSTOM_MAX_SEC = 10;
+export const CUSTOM_MAX_COUNT = 8; // sounds in the library (the Rust side checks it too)
 export const CUSTOM_MAX_BYTES = 5 * 1024 * 1024;
 export const CUSTOM_EXTS = ["webm", "ogg", "mp3", "wav", "m4a"];
+
+const POMODORO_VOLUME = 0.7; // share of the set volume for the pomodoro switches
 
 const RESUME_TIMEOUT_MS = 1000;
 const DECODE_RATE = 44100;
@@ -25,7 +28,7 @@ const tone = (ctx: BaseAudioContext, out: AudioNode, t0: number, {freq, type = "
   osc.stop(start + attack + decay + 0.05);
 };
 
-const RECIPES: Record<Exclude<SoundId, "custom">, Tone[]> = {
+const RECIPES: Record<BuiltinSound, Tone[]> = {
   // Csengő: 880/660/880/1320 Hz with an octave overtone
   chime: [880, 660, 880, 1320].flatMap((freq, i): Tone[] => [
     {freq, at: i * 0.2, decay: 0.55, gain: 0.32},
@@ -44,22 +47,27 @@ const RECIPES: Record<Exclude<SoundId, "custom">, Tone[]> = {
   })),
 };
 
-// Plays a sound at volume 0..1. Returns immediately; the audio is scheduled on the context.
-export const playSound = (ctx: AudioContext, id: SoundId, volume: number, custom: AudioBuffer | null) => {
+// Plays a sound at volume 0..1; `custom` is the decoded buffer of a custom sound.
+// Returns immediately; the audio is scheduled on the context.
+export const playSound = (ctx: AudioContext, ref: SoundRef, volume: number, custom: AudioBuffer | null) => {
   const out = ctx.createGain();
   out.gain.value = Math.max(0, Math.min(1, volume));
   out.connect(ctx.destination);
   const t0 = ctx.currentTime + 0.02;
-  if (id === "custom" && custom) {
+  const builtin = ref in RECIPES ? (ref as BuiltinSound) : null;
+  if (!builtin && custom) {
     const src = ctx.createBufferSource();
     src.buffer = custom;
     src.connect(out);
     src.start(t0, 0, CUSTOM_MAX_SEC);
     return;
   }
-  // "custom" without a saved file falls back to the chime
-  RECIPES[id === "custom" ? "chime" : id].forEach((t) => tone(ctx, out, t0, t));
+  // A custom sound that is missing or could not be decoded falls back to the chime
+  RECIPES[builtin ?? FALLBACK_SOUND].forEach((t) => tone(ctx, out, t0, t));
 };
+
+// Share of the set volume an event plays at (the settings preview uses it too)
+export const eventVolume = (event: AlarmEvent) => (event === "timeUp" ? 1 : POMODORO_VOLUME);
 
 // Decodes audio bytes; throws if the data is not playable
 export const decodeSound = (bytes: ArrayBuffer) =>

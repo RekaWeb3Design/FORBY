@@ -4,28 +4,36 @@ import {availableMonitors, getCurrentWindow, LogicalSize, PhysicalPosition} from
 import {nearestAreaIndex, workAreaOf} from "./bounds";
 import {logError} from "./log";
 import {
+  ALARM_EVENTS,
   COLOR_PRESETS,
+  customId,
+  customRef,
   DEFAULT_SETTINGS,
+  FALLBACK_SOUND,
   POMODORO_BREAK,
   POMODORO_FOCUS,
   SOUNDS,
+  type AlarmEvent,
   type Settings,
-  type SoundId,
+  type SoundRef,
 } from "./prefs";
-import {CUSTOM_EXTS, CUSTOM_MAX_BYTES, CUSTOM_MAX_SEC, decodeSound, playSound} from "./sounds";
+import {CUSTOM_EXTS, CUSTOM_MAX_BYTES, CUSTOM_MAX_COUNT, CUSTOM_MAX_SEC, decodeSound, eventVolume, playSound} from "./sounds";
 import {
   ALARM_TEST_EVENT,
-  CUSTOM_SOUND_EVENT,
-  loadCustomSound,
-  readCustomSoundInfo,
+  deleteSound,
+  loadSound,
   readSettings,
-  saveCustomSound,
+  readSoundLibrary,
+  saveSound,
   SETTINGS_CLOSED_EVENT,
   SETTINGS_EVENT,
-  writeCustomSoundInfo,
+  SOUND_LIBRARY_EVENT,
+  SOUND_NAME_MAX,
+  withKnownSounds,
   writeSettings,
+  writeSoundLibrary,
   type AlarmTest,
-  type CustomSoundInfo,
+  type LibrarySound,
 } from "./store";
 import "./Settings.css";
 
@@ -34,8 +42,10 @@ const PANEL_GAP = 12; // logical px between the ring and the panel
 const BLUR_GRACE_MS = 150; // focus may come back right away (e.g. a native dialog closing)
 const RECORD_MAX_SEC = 5;
 const RECORD_MIME = "audio/webm;codecs=opus";
+const NEW_SOUND_NAME = "Saját hang"; // recordings are named "Saját hang N", the smallest free N
 
 type Tab = "look" | "alerts";
+type Status = {text: string; error: boolean};
 
 // Dev only: fire each signal in the main window right away; the jump waits 3 s so the cursor can move away
 const ALARM_TESTS: {id: AlarmTest; label: string}[] = [
@@ -79,6 +89,15 @@ const placeAndShow = async (w: number, h: number) => {
   }
 };
 
+const newSoundId = () => `${Date.now().toString(36)}${Math.floor(Math.random() * 1296).toString(36)}`;
+const cleanName = (name: string) => name.trim().slice(0, SOUND_NAME_MAX).trim();
+const nextSoundName = (library: LibrarySound[]) => {
+  let n = 1;
+  while (library.some((s) => s.name === `${NEW_SOUND_NAME} ${n}`)) n++;
+  return `${NEW_SOUND_NAME} ${n}`;
+};
+const soundLabel = (id: string) => SOUNDS.find((s) => s.id === id)?.label ?? id;
+
 const Row = ({label, children}: {label: string; children: ReactNode}) => (
   <div className="row">
     <span className="row-label">{label}</span>
@@ -108,30 +127,55 @@ const Slider = ({label, value, min, max, step, unit, onChange}: SliderProps) => 
   </div>
 );
 
+// Built-in sounds, then the library (grouped only when there is one)
+const SoundOptions = ({library}: {library: LibrarySound[]}) => {
+  const builtin = SOUNDS.map((s) => <option key={s.id} value={s.id}>{s.label}</option>);
+  if (!library.length) return <>{builtin}</>;
+  return (
+    <>
+      <optgroup label="Beépített">{builtin}</optgroup>
+      <optgroup label="Saját hangok">
+        {library.map((s) => <option key={s.id} value={customRef(s.id)}>{s.name}</option>)}
+      </optgroup>
+    </>
+  );
+};
+
 export default function SettingsApp() {
   const [settings, setSettings] = useState<Settings | null>(null);
+  const [library, setLibrary] = useState<LibrarySound[]>([]);
   const [tab, setTab] = useState<Tab>("look");
+  const [libraryOpen, setLibraryOpen] = useState(false); // the "Saját hangok" view over the alerts tab
   const panelRef = useRef<HTMLDivElement>(null);
   const shownRef = useRef(false);
   const closingRef = useRef(false);
   const pickerOpenRef = useRef(false); // a native dialog (colour, file, microphone) is open: focus loss must not close
-  const [customInfo, setCustomInfo] = useState<CustomSoundInfo | null>(null);
-  const [soundError, setSoundError] = useState<string | null>(null);
+  const [status, setStatus] = useState<Status | null>(null);
   const [recordLeft, setRecordLeft] = useState<number | null>(null);
+  const [renaming, setRenaming] = useState<{id: string; draft: string} | null>(null);
+  const renameDoneRef = useRef(false); // Enter or Esc ended the rename: the blur that follows must not save again
+  const [confirmDelete, setConfirmDelete] = useState<string | null>(null);
+  const escRef = useRef<() => boolean>(() => false); // true if Esc was used up inside the panel
   const recorderRef = useRef<MediaRecorder | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
   const audioRef = useRef<AudioContext | null>(null);
+  // The recorder finishes after later renders: it calls the current acceptSound (with the current library)
+  const acceptRef = useRef<(bytes: ArrayBuffer, ext: string, name: string | null) => Promise<void>>(async () => {});
 
   useEffect(() => {
-    readSettings()
-      .catch((err) => {
+    Promise.all([
+      readSettings().catch((err) => {
         logError("loading settings failed", err);
         return DEFAULT_SETTINGS;
-      })
-      .then(setSettings);
-    readCustomSoundInfo()
-      .then(setCustomInfo)
-      .catch((err) => logError("loading custom sound info failed", err));
+      }),
+      readSoundLibrary().catch((err): LibrarySound[] => {
+        logError("loading the sound library failed", err);
+        return [];
+      }),
+    ]).then(([saved, lib]) => {
+      setLibrary(lib);
+      setSettings(withKnownSounds(saved, lib));
+    });
   }, []);
 
   // Once rendered, size the window to the panel (the taller tab sets the height) and show it
@@ -151,10 +195,11 @@ export default function SettingsApp() {
     await getCurrentWindow().close().catch((err) => logError("closing settings failed", err));
   }, []);
 
-  // Close on Esc and when focus goes elsewhere (clicking beside the panel), but not while a native dialog is open
+  // Close on Esc (unless it was used up inside the panel) and when focus goes elsewhere (clicking beside
+  // the panel), but not while a native dialog is open
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") void close();
+      if (e.key === "Escape" && !escRef.current()) void close();
     };
     window.addEventListener("keydown", onKey);
     const win = getCurrentWindow();
@@ -184,6 +229,21 @@ export default function SettingsApp() {
     };
   }, [close]);
 
+  const showLibrary = tab === "alerts" && libraryOpen;
+
+  // Esc first cancels a pending delete, then leaves the library view; only then does it close the panel
+  escRef.current = () => {
+    if (confirmDelete !== null) {
+      setConfirmDelete(null);
+      return true;
+    }
+    if (showLibrary) {
+      setLibraryOpen(false);
+      return true;
+    }
+    return false;
+  };
+
   if (!settings) return null;
 
   // Every change is saved and sent to the main window at once
@@ -194,46 +254,71 @@ export default function SettingsApp() {
     emitTo(MAIN_LABEL, SETTINGS_EVENT, next).catch((err) => logError("sending settings failed", err));
   };
 
-  const customColor = !COLOR_PRESETS.includes(settings.color);
+  const updateLibrary = (next: LibrarySound[]) => {
+    setLibrary(next);
+    writeSoundLibrary(next);
+    emitTo(MAIN_LABEL, SOUND_LIBRARY_EVENT, null).catch((err) => logError("sending the sound library change failed", err));
+  };
 
-  // Preview the selected sound with the set volume
-  const preview = async () => {
+  const setEventSound = (event: AlarmEvent, ref: SoundRef) => update({sounds: {...settings.sounds, [event]: ref}});
+
+  const customColor = !COLOR_PRESETS.includes(settings.color);
+  const libraryFull = library.length >= CUSTOM_MAX_COUNT;
+
+  const switchTab = (next: Tab) => {
+    setTab(next);
+    setLibraryOpen(false);
+    setConfirmDelete(null);
+  };
+  const openLibrary = () => {
+    setStatus(null);
+    setLibraryOpen(true);
+  };
+  const leaveLibrary = () => {
+    setConfirmDelete(null);
+    setLibraryOpen(false);
+  };
+
+  // Plays a sound at the set volume times `share`
+  const preview = async (ref: SoundRef, share = 1) => {
     try {
       if (!audioRef.current) audioRef.current = new AudioContext();
       const ctx = audioRef.current;
       await ctx.resume();
-      const bytes = settings.sound === "custom" ? await loadCustomSound() : null;
+      const id = customId(ref);
+      const bytes = id === null ? null : await loadSound(id);
       const custom = bytes && bytes.byteLength ? await decodeSound(bytes) : null;
-      playSound(ctx, settings.sound, settings.volume, custom);
+      playSound(ctx, ref, settings.volume * share, custom);
     } catch (err) {
       logError("preview failed", err);
-      setSoundError("A hang nem játszható le");
+      setStatus({text: "A hang nem játszható le", error: true});
     }
   };
 
-  // Checks and saves a recorded or uploaded sound, then selects it
-  const acceptSound = async (bytes: ArrayBuffer, ext: string, name: string) => {
-    if (bytes.byteLength > CUSTOM_MAX_BYTES) return setSoundError("A fájl nagyobb 5 MB-nál");
+  // Checks a recorded or uploaded sound and adds it to the library; it is not assigned to any event
+  // name null: "Saját hang N"
+  const acceptSound = async (bytes: ArrayBuffer, ext: string, name: string | null) => {
+    if (library.length >= CUSTOM_MAX_COUNT) return setStatus({text: `Legfeljebb ${CUSTOM_MAX_COUNT} saját hang lehet`, error: true});
+    if (bytes.byteLength > CUSTOM_MAX_BYTES) return setStatus({text: "A fájl nagyobb 5 MB-nál", error: true});
     let buffer: AudioBuffer;
     try {
       buffer = await decodeSound(bytes);
     } catch {
-      return setSoundError("Ez a fájl nem lejátszható hang");
+      return setStatus({text: "Ez a fájl nem lejátszható hang", error: true});
     }
-    if (buffer.duration > CUSTOM_MAX_SEC + 0.05) return setSoundError(`A hang hosszabb ${CUSTOM_MAX_SEC} mp-nél`);
+    if (buffer.duration > CUSTOM_MAX_SEC + 0.05) return setStatus({text: `A hang hosszabb ${CUSTOM_MAX_SEC} mp-nél`, error: true});
+    const id = newSoundId();
+    name ??= nextSoundName(library);
     try {
-      await saveCustomSound(bytes, ext);
+      await saveSound(id, bytes, ext);
     } catch (err) {
       logError("saving the custom sound failed", err);
-      return setSoundError("A mentés nem sikerült");
+      return setStatus({text: "A mentés nem sikerült", error: true});
     }
-    const info = {name, durationSec: Math.round(buffer.duration * 10) / 10};
-    writeCustomSoundInfo(info);
-    setCustomInfo(info);
-    setSoundError(null);
-    emitTo(MAIN_LABEL, CUSTOM_SOUND_EVENT, null).catch((err) => logError("sending sound change failed", err));
-    update({sound: "custom"});
+    updateLibrary([...library, {id, name, durationSec: Math.round(buffer.duration * 10) / 10}]);
+    setStatus({text: `„${name}” bekerült a könyvtárba. Eseményhez a hangválasztókban rendelheted hozzá.`, error: false});
   };
+  acceptRef.current = acceptSound;
 
   // Microphone recording, max RECORD_MAX_SEC; pressing again stops early
   const record = async () => {
@@ -247,7 +332,7 @@ export default function SettingsApp() {
       stream = await navigator.mediaDevices.getUserMedia({audio: true});
     } catch (err) {
       logError("microphone access failed", err);
-      return setSoundError("Nincs hozzáférés a mikrofonhoz");
+      return setStatus({text: "Nincs hozzáférés a mikrofonhoz", error: true});
     } finally {
       pickerOpenRef.current = false;
     }
@@ -268,11 +353,11 @@ export default function SettingsApp() {
       setRecordLeft(null);
       if (closingRef.current) return;
       new Blob(chunks, {type: mimeType}).arrayBuffer()
-        .then((bytes) => acceptSound(bytes, "webm", "Felvétel"))
+        .then((bytes) => acceptRef.current(bytes, "webm", null))
         .catch((err) => logError("reading the recording failed", err));
     };
     recorderRef.current = recorder;
-    setSoundError(null);
+    setStatus(null);
     setRecordLeft(left);
     recorder.start();
   };
@@ -284,19 +369,59 @@ export default function SettingsApp() {
   const onFile = async (file: File | undefined) => {
     if (!file) return;
     const ext = file.name.split(".").pop()?.toLowerCase() ?? "";
-    if (!CUSTOM_EXTS.includes(ext)) return setSoundError(`Nem támogatott fájltípus (${CUSTOM_EXTS.join(", ")})`);
-    await acceptSound(await file.arrayBuffer(), ext, file.name);
+    if (!CUSTOM_EXTS.includes(ext)) return setStatus({text: `Nem támogatott fájltípus (${CUSTOM_EXTS.join(", ")})`, error: true});
+    const name = cleanName(file.name.replace(/\.[^.]*$/, "")) || null;
+    await acceptSound(await file.arrayBuffer(), ext, name);
   };
 
-  const customStatus = soundError
-    ?? (customInfo ? `${customInfo.name}, ${customInfo.durationSec.toLocaleString("hu-HU")} mp` : "Még nincs saját hang");
+  const startRename = (sound: LibrarySound) => {
+    renameDoneRef.current = false;
+    setConfirmDelete(null);
+    setRenaming({id: sound.id, draft: sound.name});
+  };
+  // An empty name keeps the old one
+  const finishRename = (save: boolean) => {
+    if (!renaming || renameDoneRef.current) return;
+    renameDoneRef.current = true;
+    const name = cleanName(renaming.draft);
+    const old = library.find((s) => s.id === renaming.id);
+    if (save && name && old && name !== old.name) {
+      updateLibrary(library.map((s) => (s.id === renaming.id ? {...s, name} : s)));
+    }
+    setRenaming(null);
+  };
+
+  // Events that used the deleted sound switch to the fallback (chime)
+  const remove = async (sound: LibrarySound) => {
+    setConfirmDelete(null);
+    try {
+      await deleteSound(sound.id);
+    } catch (err) {
+      logError("deleting the custom sound failed", err);
+      return setStatus({text: "A törlés nem sikerült", error: true});
+    }
+    const ref = customRef(sound.id);
+    const used = ALARM_EVENTS.filter((e) => settings.sounds[e.id] === ref);
+    if (used.length) {
+      const sounds = {...settings.sounds};
+      used.forEach((e) => {sounds[e.id] = FALLBACK_SOUND;});
+      update({sounds});
+    }
+    updateLibrary(library.filter((s) => s.id !== sound.id));
+    const switched = used.length ? ` ${used.map((e) => e.label).join(", ")}: ${soundLabel(FALLBACK_SOUND)} lett.` : "";
+    setStatus({text: `„${sound.name}” törölve.${switched}`, error: false});
+  };
+
+  const libraryStatus: Status | null = status
+    ?? (libraryFull ? {text: `Legfeljebb ${CUSTOM_MAX_COUNT} saját hang lehet, újhoz törölj egyet.`, error: false}
+      : library.length ? null : {text: "Még nincs saját hang.", error: false});
 
   return (
     <div className="panel" ref={panelRef}>
       <div className="head">
         <div className="tabs" role="tablist">
-          <button role="tab" aria-selected={tab === "look"} className="tab" onClick={() => setTab("look")}>Megjelenés és időzítés</button>
-          <button role="tab" aria-selected={tab === "alerts"} className="tab" onClick={() => setTab("alerts")}>Riasztások</button>
+          <button role="tab" aria-selected={tab === "look"} className="tab" onClick={() => switchTab("look")}>Megjelenés és időzítés</button>
+          <button role="tab" aria-selected={tab === "alerts"} className="tab" onClick={() => switchTab("alerts")}>Riasztások</button>
         </div>
         <button className="close" aria-label="Bezárás" onClick={() => void close()}>×</button>
       </div>
@@ -333,38 +458,52 @@ export default function SettingsApp() {
           <SwitchRow label="Indítás a géppel" checked={settings.autostart} onChange={(v) => update({autostart: v})} />
         </section>
 
-        <section className={`page${tab === "alerts" ? "" : " inactive"}`} aria-hidden={tab !== "alerts"}>
-          <Row label="Hang">
-            <div className="sound">
-              <Switch label="Hang" checked={settings.soundOn} onChange={(v) => update({soundOn: v})} />
-              <select aria-label="Hang választása" value={settings.sound} disabled={!settings.soundOn} onChange={(e) => update({sound: e.target.value as SoundId})}>
-                {SOUNDS.map((s) => <option key={s.id} value={s.id}>{s.label}</option>)}
-              </select>
-              <button className="icon-btn" aria-label="Lejátszás" title="Előhallgatás" disabled={!settings.soundOn} onClick={() => void preview()}>▶</button>
-            </div>
-          </Row>
-          <Slider label="Hangerő" unit="%" min={0} max={100} step={5} value={Math.round(settings.volume * 100)} onChange={(v) => update({volume: v / 100})} />
+        <section className={`page${tab === "alerts" && !showLibrary ? "" : " inactive"}`} aria-hidden={tab !== "alerts" || showLibrary}>
           <div className="field">
-            <span className="row-label">Saját hang</span>
-            <div className="buttons">
-              <button className={`btn${recordLeft !== null ? " recording" : ""}`} onClick={() => void record()}>
-                {recordLeft !== null ? `Leállítás (${recordLeft})` : `Felvétel (max ${RECORD_MAX_SEC} mp)`}
-              </button>
-              <button className="btn" disabled={recordLeft !== null} onClick={upload}>Fájl feltöltése</button>
-              <input
-                ref={fileRef}
-                type="file"
-                accept={CUSTOM_EXTS.map((e) => `.${e}`).join(",")}
-                hidden
-                onChange={(e) => {
-                  const file = e.target.files?.[0];
-                  e.target.value = "";
-                  void onFile(file);
-                }}
-              />
+            <div className="field-head">
+              <span className="row-label">Hang</span>
+              <span className="sound-head">
+                <span className="field-value">{Math.round(settings.volume * 100)} %</span>
+                <Switch label="Hang" checked={settings.soundOn} onChange={(v) => update({soundOn: v})} />
+              </span>
             </div>
-            <span className={`status${soundError ? " error" : ""}`} title={customStatus}>{customStatus}</span>
+            <input
+              type="range"
+              aria-label="Hangerő"
+              min={0}
+              max={100}
+              step={5}
+              value={Math.round(settings.volume * 100)}
+              onChange={(e) => update({volume: Number(e.target.value) / 100})}
+            />
           </div>
+          <div className="events">
+            {ALARM_EVENTS.map(({id, label}) => (
+              <Row key={id} label={label}>
+                <div className="sound">
+                  <select
+                    aria-label={`${label}: hang`}
+                    value={settings.sounds[id]}
+                    disabled={!settings.soundOn}
+                    onChange={(e) => setEventSound(id, e.target.value as SoundRef)}
+                  >
+                    <SoundOptions library={library} />
+                  </select>
+                  <button
+                    className="icon-btn"
+                    aria-label={`${label}: előhallgatás`}
+                    title="Előhallgatás"
+                    disabled={!settings.soundOn}
+                    onClick={() => void preview(settings.sounds[id], eventVolume(id))}
+                  >▶</button>
+                </div>
+              </Row>
+            ))}
+          </div>
+          <button className="row nav-row" onClick={openLibrary}>
+            <span className="row-label">Saját hangok</span>
+            <span className="field-value">{library.length} / {CUSTOM_MAX_COUNT} ›</span>
+          </button>
           <SwitchRow label="Tálca-villogás" checked={settings.flashTaskbar} onChange={(v) => update({flashTaskbar: v})} />
           <SwitchRow label="Windows értesítés" checked={settings.notification} onChange={(v) => update({notification: v})} />
           <SwitchRow label="Odaugrik a kurzorhoz" checked={settings.jumpToCursor} onChange={(v) => update({jumpToCursor: v})} />
@@ -377,6 +516,76 @@ export default function SettingsApp() {
             </div>
           )}
         </section>
+
+        {/* Layered over the alerts page, so it never changes the measured panel height; its list scrolls instead.
+            A pending delete stays until confirmed, Esc, or a click anywhere else in this view. */}
+        {showLibrary && (
+          <section
+            className="library"
+            aria-label="Saját hangok"
+            onPointerDown={(e) => {
+              if (confirmDelete !== null && !(e.target as Element).closest("[data-confirm]")) setConfirmDelete(null);
+            }}
+          >
+            <div className="library-head">
+              <button className="icon-btn back" aria-label="Vissza" title="Vissza" onClick={leaveLibrary}>‹</button>
+              <span className="library-title">Saját hangok</span>
+              <span className="field-value">{library.length} / {CUSTOM_MAX_COUNT}</span>
+            </div>
+            <ul className="library-list">
+              {library.map((sound) => (
+                <li key={sound.id} className="library-item">
+                  {renaming?.id === sound.id ? (
+                    <input
+                      className="rename"
+                      aria-label="Új név"
+                      autoFocus
+                      maxLength={SOUND_NAME_MAX}
+                      value={renaming.draft}
+                      onFocus={(e) => e.target.select()}
+                      onChange={(e) => setRenaming({id: sound.id, draft: e.target.value})}
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter") finishRename(true);
+                        if (e.key === "Escape") {
+                          e.stopPropagation();
+                          finishRename(false);
+                        }
+                      }}
+                      onBlur={() => finishRename(true)}
+                    />
+                  ) : (
+                    <button className="sound-name" title={`${sound.name} (átnevezés)`} onClick={() => startRename(sound)}>{sound.name}</button>
+                  )}
+                  <span className="field-value">{sound.durationSec.toLocaleString("hu-HU")} mp</span>
+                  <button className="icon-btn" aria-label={`${sound.name}: előhallgatás`} title="Előhallgatás" onClick={() => void preview(customRef(sound.id))}>▶</button>
+                  {confirmDelete === sound.id ? (
+                    <button className="icon-btn confirm" data-confirm onClick={() => void remove(sound)}>Törlöd?</button>
+                  ) : (
+                    <button className="icon-btn remove" aria-label={`${sound.name}: törlés`} title="Törlés" onClick={() => setConfirmDelete(sound.id)}>×</button>
+                  )}
+                </li>
+              ))}
+            </ul>
+            <div className="buttons">
+              <button className={`btn${recordLeft !== null ? " recording" : ""}`} disabled={libraryFull && recordLeft === null} onClick={() => void record()}>
+                {recordLeft !== null ? `Leállítás (${recordLeft})` : `Felvétel (max ${RECORD_MAX_SEC} mp)`}
+              </button>
+              <button className="btn" disabled={libraryFull || recordLeft !== null} onClick={upload}>Fájl feltöltése</button>
+              <input
+                ref={fileRef}
+                type="file"
+                accept={CUSTOM_EXTS.map((e) => `.${e}`).join(",")}
+                hidden
+                onChange={(e) => {
+                  const file = e.target.files?.[0];
+                  e.target.value = "";
+                  void onFile(file);
+                }}
+              />
+            </div>
+            <span className={`library-status${libraryStatus?.error ? " error" : ""}`} role="status">{libraryStatus?.text}</span>
+          </section>
+        )}
       </div>
     </div>
   );

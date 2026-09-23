@@ -6,15 +6,14 @@ import type {Ui} from "./foby";
 import {formatMinutes} from "./format";
 import {CONTENT_BOTTOM, ORB_CX, ORB_CY, RING_OUTER} from "./layout";
 import {logError, logInfo} from "./log";
-import type {Settings} from "./prefs";
-import {createAudio, decodeSound, playSound} from "./sounds";
-import {ALARM_TEST_EVENT, CUSTOM_SOUND_EVENT, loadCustomSound, writePosition, type AlarmTest} from "./store";
+import {customId, type AlarmEvent, type Settings} from "./prefs";
+import {createAudio, decodeSound, eventVolume, playSound} from "./sounds";
+import {ALARM_TEST_EVENT, loadSound, SOUND_LIBRARY_EVENT, writePosition, type AlarmTest} from "./store";
 import type {AnimateTo} from "./useDragFling";
 import type {OnTimerEvent} from "./useFoby";
 import {useWindowEvent} from "./useSettings";
 
 const ALARM_REPEAT_MS = 10_200;
-const POMODORO_VOLUME = 0.7; // share of the set volume
 const SOFT_FLASH_MS = 30_000; // goal / pomodoro flashing stops by itself after this
 
 // Jump to the cursor (logical px, scaled by the target monitor)
@@ -46,32 +45,51 @@ export const useAlarms = (settings: Settings, ui: Ui, animateTo: AnimateTo) => {
   const settingsRef = useRef(settings);
   settingsRef.current = settings;
   const audioRef = useRef(createAudio());
-  const customRef = useRef<AudioBuffer | null>(null);
+  // Decoded custom sounds by library id (null: missing or not playable, the chime plays instead)
+  const buffersRef = useRef(new Map<string, Promise<AudioBuffer | null>>());
   const softFlashRef = useRef<number | null>(null);
 
-  // Custom sound: loaded at start and whenever the settings window saves a new one
-  const loadCustom = useCallback(async () => {
-    try {
-      const bytes = await loadCustomSound();
-      customRef.current = bytes.byteLength ? await decodeSound(bytes) : null;
-    } catch (err) {
-      customRef.current = null;
-      logError("loading the custom sound failed", err);
+  const customBuffer = useCallback((id: string) => {
+    let buffer = buffersRef.current.get(id);
+    if (!buffer) {
+      buffer = loadSound(id)
+        .then((bytes) => (bytes.byteLength ? decodeSound(bytes) : null))
+        .catch((err) => {
+          logError(`loading custom sound ${id} failed`, err);
+          return null;
+        });
+      buffersRef.current.set(id, buffer);
     }
+    return buffer;
   }, []);
-  useEffect(() => {void loadCustom();}, [loadCustom]);
-  useWindowEvent<null>(CUSTOM_SOUND_EVENT, () => void loadCustom());
 
-  const play = useCallback(async (share = 1) => {
+  // The custom sounds assigned to events are decoded ahead, so an alarm plays at once
+  const preload = useCallback(() => {
+    Object.values(settingsRef.current.sounds).forEach((ref) => {
+      const id = customId(ref);
+      if (id !== null) void customBuffer(id);
+    });
+  }, [customBuffer]);
+  const soundsKey = Object.values(settings.sounds).join();
+  useEffect(preload, [preload, soundsKey]);
+  // The library changed (sound added, replaced or deleted): decode again
+  useWindowEvent<null>(SOUND_LIBRARY_EVENT, () => {
+    buffersRef.current.clear();
+    preload();
+  });
+
+  const play = useCallback(async (event: AlarmEvent) => {
     const s = settingsRef.current;
     if (!s.soundOn) return;
     try {
-      const ctx = await audioRef.current.get();
-      playSound(ctx, s.sound, s.volume * share, customRef.current);
+      const ref = s.sounds[event];
+      const id = customId(ref);
+      const [ctx, custom] = await Promise.all([audioRef.current.get(), id === null ? null : customBuffer(id)]);
+      playSound(ctx, ref, s.volume * eventVolume(event), custom);
     } catch (err) {
       logError("playing the alarm failed", err);
     }
-  }, []);
+  }, [customBuffer]);
 
   // Taskbar flashing; a soft one stops by itself after softMs
   const stopFlash = useCallback(() => {
@@ -147,8 +165,8 @@ export const useAlarms = (settings: Settings, ui: Ui, animateTo: AnimateTo) => {
     if (!isAlarm) return;
     const s = settingsRef.current;
     logInfo(`timer alarm (flash ${s.flashTaskbar ? "on" : "off"}, toast ${s.notification ? "on" : "off"}, jump ${s.jumpToCursor ? "on" : "off"})`);
-    void play();
-    const repeat = window.setInterval(() => void play(), ALARM_REPEAT_MS);
+    void play("timeUp");
+    const repeat = window.setInterval(() => void play("timeUp"), ALARM_REPEAT_MS);
     flash(false);
     if (s.notification) void notify("Lejárt az idő");
     if (s.jumpToCursor) void jump();
@@ -162,13 +180,13 @@ export const useAlarms = (settings: Settings, ui: Ui, animateTo: AnimateTo) => {
     const s = settingsRef.current;
     logInfo(`${event} (flash ${s.flashTaskbar ? "on" : "off"}, toast ${s.notification ? "on" : "off"})`);
     if (event === "goalLap") {
-      void play();
+      void play("timeUp");
       if (snap.goalLaps !== 1) return;
       flash(true);
       if (s.notification) void notify(`Elérted a célt (${formatMinutes(session.targetMs / 60_000)})`);
     }
     if (event === "pomodoroSwitch") {
-      void play(POMODORO_VOLUME);
+      void play(snap.phase === "break" ? "breakStart" : "backToWork");
       flash(true);
       if (s.notification) void notify(snap.phase === "break" ? "Szünet következik" : "Vissza a fókuszhoz");
     }

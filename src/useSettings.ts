@@ -38,8 +38,10 @@ export const useSettings = (initial: Settings) => {
   const currentRef = useRef(initial);
   useWindowEvent<unknown>(SETTINGS_EVENT, (payload) => {
     const next = normalizeSettings(payload);
-    const changed = (Object.keys(next) as (keyof Settings)[]).filter((k) => next[k] !== currentRef.current[k]);
-    if (changed.length) logInfo(`settings received: ${changed.map((k) => `${k}=${next[k]}`).join(", ")}`);
+    const text = (k: keyof Settings) => (typeof next[k] === "object" ? JSON.stringify(next[k]) : String(next[k]));
+    const changed = (Object.keys(next) as (keyof Settings)[])
+      .filter((k) => JSON.stringify(next[k]) !== JSON.stringify(currentRef.current[k]));
+    if (changed.length) logInfo(`settings received: ${changed.map((k) => `${k}=${text(k)}`).join(", ")}`);
     currentRef.current = next;
     setSettings(next);
   });

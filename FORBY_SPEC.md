@@ -98,14 +98,26 @@ Időformátum: `m:ss`, egy óra fölött `h:mm:ss`, tabuláris számjegyek.
 - Kis kerek gomb (három pötty) a gyűrű **bal alsó** részén, minimális átfedéssel.
 - Külön kis ablakot nyit FORBY mellett, **két füllel**, a panel magassága a nagyobbik fülhöz igazodik, semmi ne legyen levágva:
   1. **Megjelenés és időzítés:** gömb színe (5 preset + egyedi színválasztó), olvasó animáció fókusz alatt (alapból ki), pomodoro fókusz (5–60 perc, 5-ös lépés) és szünet (1–20 perc) csúszkával, „Játék mód” kapcsoló (alapból be).
-  2. **Riasztások:** hang be/ki és hangválasztó egy sorban lejátszás gombbal; hangerő (alapból 80%); saját hang felvétele (max 5 mp) vagy hangfájl feltöltése; tálca-villogás (alapból be); Windows értesítés (alapból ki); odaugrik a kurzorhoz (alapból ki).
+  2. **Riasztások:** „Hang” mező: be/ki kapcsoló és hangerő (alapból 80%) egy mezőben, közös minden eseményre; három eseménysor („Idő lejárt”, „Szünet kezdődik”, „Vissza a munkához”), mindegyikben hangválasztó és előhallgatás gomb; „Saját hangok” sor (darabszám, pl. „2 / 8 ›”), ami a hangkönyvtár nézetét nyitja; tálca-villogás (alapból be); Windows értesítés (alapból ki); odaugrik a kurzorhoz (alapból ki).
+  - A hangválasztóban a négy beépített hang, alattuk (ha van) külön csoportban a saját hangok. Kikapcsolt hangnál a választók és az előhallgatás tiltott. Az előhallgatás azon a hangerőn szól, amelyen élesben (pomodoro-váltásnál 70%).
+  - **Saját hangok nézet:** ugyanazon a fülön, a lap fölé rétegezve, így a panel magasságát nem befolyásolja; a lista a panelen belül görget. Fejléc: vissza gomb (‹), cím, darabszám. Soronként: név (kattintásra átnevezhető: Enter/fókuszvesztés ment, Esc elvet, üres név esetén a régi marad, max 30 karakter), hossz, előhallgatás, törlés (×). Alul: felvétel és fájl feltöltése, alattuk státuszsor.
+  - Törlés két lépésben: a × „Törlöd?”-re vált, és így marad, amíg meg nem erősíted, a nézetben máshova nem kattintasz, vagy Esc-et nem nyomsz. Az Esc sorrendben: törlés megszakítása → vissza a könyvtárból → panel bezárása.
 - A beállítások tartósan mentve (pl. tauri-plugin-store), és azonnal érvényesülnek a fő ablakban.
 
 ## Riasztások
 
-- Hangok Web Audio-val szintetizálva (prototípus szerint): Csengő (880/660/880/1320 Hz sorozat felhanggal), Harang (523 és 659 Hz inharmonikus felhangokkal), Pittyegés (3× 1200 Hz square), Gong (110/220/331 Hz), valamint Saját hang (a felvett vagy feltöltött fájl az app adatmappájában tárolva).
-- Mikor szól: timer lejártakor, majd 10,2 mp-enként, amíg le nem zárod; cél-stopper minden teljes körénél; pomodoro váltásnál halkabban (70%).
-- Saját hang: felvétel max 5 mp, feltöltött fájl max 5 MB és max 10 mp; csak lejátszható (dekódolható) hang menthető.
+- Beépített hangok Web Audio-val szintetizálva (prototípus szerint): Csengő (880/660/880/1320 Hz sorozat felhanggal), Harang (523 és 659 Hz inharmonikus felhangokkal), Pittyegés (3× 1200 Hz square), Gong (110/220/331 Hz).
+- Eseményenként külön hang (alapból mindhárom Csengő):
+  - **Idő lejárt:** timer lejártakor, majd 10,2 mp-enként, amíg le nem zárod; a cél-stopper minden teljes körénél;
+  - **Szünet kezdődik:** pomodoro fókusz → szünet váltáskor, halkabban (70%);
+  - **Vissza a munkához:** pomodoro szünet → fókusz váltáskor, halkabban (70%).
+- **Saját hangok könyvtára:** legfeljebb 8 felvett vagy feltöltött hang, mindegyiknek neve van, átnevezhető, törölhető, és bármelyik eseményhez hozzárendelhető. A fájlok az app adatmappájában (`sounds/<id>.<kiterjesztés>`), a lista (id, név, hossz) a store `soundLibrary` kulcsában.
+  - Felvétel max 5 mp, feltöltött fájl max 5 MB és max 10 mp; csak lejátszható (dekódolható) hang menthető. A darabszám-korlátot a Rust oldal is ellenőrzi.
+  - Új felvétel neve „Saját hang N” (a legkisebb szabad N), feltöltött fájlé a fájlnév kiterjesztés nélkül.
+  - Az új hang nem rendelődik automatikusan eseményhez; a státuszsor jelzi, hogy bekerült a könyvtárba, és a hangválasztókban rendelhető hozzá.
+  - Törléskor az azt használó események Csengőre váltanak (a státuszsor megírja, melyek). Hiányzó vagy le nem játszható saját hang helyett is a Csengő szól.
+  - A fő ablak az eseményekhez rendelt saját hangokat előre dekódolja, hogy a riasztás azonnal szóljon.
+- **Migráció 0.1.1 → 0.2.0** (egyszer, a fő ablak indulásakor, mielőtt a beállítás-ablak megnyílhatna): a régi egyetlen saját hang (`sounds/custom.*`) „Saját hang 1” néven a könyvtárba kerül, a régi hangválasztás mindhárom esemény alapértelmezése lesz (ha „Saját hang” volt, de nincs fájl: Csengő). A régi `customSound` kulcs törlődik. Megszakadás esetén a következő indításkor biztonságosan újrafut.
 - Tálca-villogás (ha be van kapcsolva): `requestUserAttention` timer lejártakor (alarm), a cél-stopper első körénél és pomodoro-váltáskor. Alarm-nál lezáráskor mindenképp megszűnik; a másik kettőnél akkor, amikor FORBY fókuszt kap vagy rákattintasz, de legkésőbb 30 mp után magától.
 - Windows értesítés (ha be van kapcsolva), rövid toast „FORBY” címmel:
   - timer lejártakor: „Lejárt az idő”;
@@ -134,6 +146,7 @@ Időformátum: `m:ss`, egy óra fölött `h:mm:ss`, tabuláris számjegyek.
 4. Beállítás-gomb, beállítás-ablak két füllel, tartós mentés.
 5. Riasztások: hangok, saját hang, tálca-villogás, értesítés, odaugrás.
 6. Indítás a géppel (autostart), tálcaikon kilépés menüvel.
+7. (0.2.0) Eseményenként külön hang, saját hangok könyvtára, migráció 0.1.1-ről.
 
 ## Ismert apróságok
 
