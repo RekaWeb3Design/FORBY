@@ -53,12 +53,6 @@ const SOUND_MAX_BYTES: usize = 5 * 1024 * 1024;
 const SOUND_MAX_COUNT: usize = 8;
 const SOUND_ID_MAX: usize = 16;
 
-// Learn more about Tauri commands at https://tauri.app/develop/calling-rust/
-#[tauri::command]
-fn greet(name: &str) -> String {
-    format!("Hello, {}! You've been greeted from Rust!", name)
-}
-
 // Created here (not from JS) so it gets the same WebView2 browser arguments as the main window;
 // WebView2 refuses webviews with different arguments on the same data directory.
 #[tauri::command]
@@ -491,7 +485,6 @@ pub fn run() {
             }
         })
         .invoke_handler(tauri::generate_handler![
-            greet,
             open_settings,
             save_sound,
             read_sound,
