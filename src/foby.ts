@@ -1,6 +1,7 @@
 // FORBY state machine and what each state shows. Pure: time comes in with the actions.
 import type {FaceState} from "./Face";
 import {DURATION_MAX, DURATION_MIN, formatElapsed, formatMinutes, formatRemaining} from "./format";
+import {POMODORO_BREAK, POMODORO_FOCUS} from "./prefs";
 import {isOvertime, pauseSession, resumeSession, snapshot, startSession, syncSession, type Mode, type Session} from "./timer";
 import {strings, type Lang, type Strings} from "./strings";
 
@@ -26,7 +27,16 @@ export type FobyAction =
   | {type: "wheel"; delta: number}
   | {type: "submit"; minutes: number; now: number}
   | {type: "tick"; now: number}
-  | {type: "settings"; pomodoro: Pomodoro};
+  | {type: "settings"; pomodoro: Pomodoro}
+  | {type: "intent"; intent: Intent; now: number};
+
+// What the user wants, independent of the gesture that expresses it
+export type Intent =
+  | {type: "start"; mode: Mode; minutes?: number; focusMin?: number; breakMin?: number}
+  | {type: "pause"}
+  | {type: "resume"}
+  | {type: "finish"}
+  | {type: "dismiss"};
 
 const DURATION_CHIPS = [5, 15, 25, 45, 60];
 
@@ -54,13 +64,22 @@ export const createState = (durationMin: number, pomodoro: Pomodoro): FobyState 
   now: 0,
 });
 
-const start = (state: FobyState, mode: Mode, now: number, durationMin = state.durationMin): FobyState => ({
+// pomodoro: lengths for this session only, state.pomodoro stays
+const start = (state: FobyState, mode: Mode, now: number, durationMin = state.durationMin, pomodoro = state.pomodoro): FobyState => ({
   ...state,
   ui: "run",
   durationMin,
-  session: startSession(mode, durationMin, state.pomodoro, now),
+  session: startSession(mode, durationMin, pomodoro, now),
   now,
 });
+
+const pause = (state: FobyState, now: number): FobyState =>
+  state.session ? {...state, ui: "paused", session: pauseSession(state.session, now), now} : state;
+
+const resume = (state: FobyState, now: number): FobyState =>
+  state.session ? {...state, ui: "run", session: resumeSession(state.session, now), now} : state;
+
+const dismiss = (state: FobyState, now: number): FobyState => ({...state, ui: "idle", session: null, now});
 
 const toSummary = (state: FobyState, now: number): FobyState => ({
   ...state,
@@ -70,15 +89,14 @@ const toSummary = (state: FobyState, now: number): FobyState => ({
 });
 
 const onOrb = (state: FobyState, now: number): FobyState => {
-  const s = state.session;
   switch (state.ui) {
     case "idle": return {...state, ui: "pickMode", now};
     case "pickMode": return {...state, ui: "idle", now};
     case "pickDur": return start(state, state.pickFor, now);
-    case "run": return s ? {...state, ui: "paused", session: pauseSession(s, now), now} : state;
-    case "paused": return s ? {...state, ui: "run", session: resumeSession(s, now), now} : state;
+    case "run": return pause(state, now);
+    case "paused": return resume(state, now);
     case "alarm": return toSummary(state, now);
-    case "summary": return {...state, ui: "idle", session: null, now};
+    case "summary": return dismiss(state, now);
   }
 };
 
@@ -98,6 +116,46 @@ const onChip = (state: FobyState, id: ChipId, now: number): FobyState => {
   return state;
 };
 
+const inRange = (v: number, r: {min: number; max: number}) => Number.isInteger(v) && v >= r.min && v <= r.max;
+const optInRange = (v: number | undefined, r: {min: number; max: number}) => v === undefined || inRange(v, r);
+
+export const canApply = (state: FobyState, intent: Intent): boolean => {
+  const ui = state.ui;
+  switch (intent.type) {
+    case "start": {
+      if (ui !== "idle" && ui !== "pickMode" && ui !== "pickDur") return false;
+      if (intent.mode === "timer" || intent.mode === "goal") {
+        return intent.minutes !== undefined && inRange(intent.minutes, {min: DURATION_MIN, max: DURATION_MAX});
+      }
+      if (intent.mode === "pomodoro") return optInRange(intent.focusMin, POMODORO_FOCUS) && optInRange(intent.breakMin, POMODORO_BREAK);
+      return true;
+    }
+    case "pause": return ui === "run";
+    case "resume": return ui === "paused";
+    case "finish": return ui === "run" || ui === "paused";
+    case "dismiss": return ui === "alarm" || ui === "summary";
+  }
+};
+
+// Same results as the gesture path; callers check canApply first
+const applyIntent = (state: FobyState, intent: Intent, now: number): FobyState => {
+  switch (intent.type) {
+    case "start":
+      if (intent.mode === "timer" || intent.mode === "goal") {
+        return start({...state, pickFor: intent.mode}, intent.mode, now, intent.minutes);
+      }
+      if (intent.mode === "pomodoro") {
+        const pomodoro = {focusMin: intent.focusMin ?? state.pomodoro.focusMin, breakMin: intent.breakMin ?? state.pomodoro.breakMin};
+        return start(state, intent.mode, now, state.durationMin, pomodoro);
+      }
+      return start(state, intent.mode, now);
+    case "pause": return pause(state, now);
+    case "resume": return resume(state, now);
+    case "finish": return toSummary(state, now);
+    case "dismiss": return dismiss(state, now);
+  }
+};
+
 export const reducer = (state: FobyState, action: FobyAction): FobyState => {
   switch (action.type) {
     case "orb": return onOrb(state, action.now);
@@ -115,6 +173,8 @@ export const reducer = (state: FobyState, action: FobyAction): FobyState => {
     }
     case "settings":
       return {...state, pomodoro: action.pomodoro};
+    case "intent":
+      return canApply(state, action.intent) ? applyIntent(state, action.intent, action.now) : state;
   }
 };
 
