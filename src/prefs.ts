@@ -1,4 +1,5 @@
 // User settings: types, defaults and validation of stored values.
+import type {Lang, TextKey} from "./strings";
 
 export type BuiltinSound = "chime" | "bell" | "beep" | "gong";
 export type SoundRef = BuiltinSound | `custom:${string}`; // custom:<library id>
@@ -6,6 +7,7 @@ export type AlarmEvent = "timeUp" | "breakStart" | "backToWork";
 export type EventSounds = Record<AlarmEvent, SoundRef>;
 
 export type Settings = {
+  lang: Lang; // UI language
   // Megjelenés és időzítés
   color: string;
   readingAnimation: boolean;
@@ -24,18 +26,20 @@ export type Settings = {
 
 export const COLOR_PRESETS = ["#EDEBE4", "#2C2C2A", "#F0997B", "#5DCAA5", "#7F77DD"];
 
-export const SOUNDS: {id: BuiltinSound; label: string}[] = [
-  {id: "chime", label: "Csengő"},
-  {id: "bell", label: "Harang"},
-  {id: "beep", label: "Pittyegés"},
-  {id: "gong", label: "Gong"},
+// label: key of the sound's name in strings
+export const SOUNDS: {id: BuiltinSound; label: TextKey}[] = [
+  {id: "chime", label: "soundChime"},
+  {id: "bell", label: "soundBell"},
+  {id: "beep", label: "soundBeep"},
+  {id: "gong", label: "soundGong"},
 ];
 export const FALLBACK_SOUND: BuiltinSound = "chime"; // for a missing or unplayable custom sound
 
-export const ALARM_EVENTS: {id: AlarmEvent; label: string}[] = [
-  {id: "timeUp", label: "Idő lejárt"}, // timer alarm and goal laps
-  {id: "breakStart", label: "Szünet kezdődik"}, // pomodoro focus -> break
-  {id: "backToWork", label: "Vissza a munkához"}, // pomodoro break -> focus
+// label: key of the event's name in strings
+export const ALARM_EVENTS: {id: AlarmEvent; label: TextKey}[] = [
+  {id: "timeUp", label: "eventTimeUp"}, // timer alarm and goal laps
+  {id: "breakStart", label: "eventBreakStart"}, // pomodoro focus -> break
+  {id: "backToWork", label: "eventBackToWork"}, // pomodoro break -> focus
 ];
 
 // Library id the single custom sound of 0.1.x gets when migrated
@@ -49,6 +53,7 @@ export const POMODORO_FOCUS = {min: 5, max: 60, step: 5};
 export const POMODORO_BREAK = {min: 1, max: 20, step: 1};
 
 export const DEFAULT_SETTINGS: Settings = {
+  lang: "en",
   color: COLOR_PRESETS[0],
   readingAnimation: false,
   pomodoroFocusMin: 25,
@@ -68,6 +73,7 @@ export const DEFAULT_DURATION_MIN = 25;
 
 const isRecord = (v: unknown): v is Record<string, unknown> => typeof v === "object" && v !== null;
 const bool = (v: unknown, d: boolean) => (typeof v === "boolean" ? v : d);
+const lang = (v: unknown, d: Lang): Lang => (v === "en" || v === "hu" ? v : d);
 const stepped = (v: unknown, d: number, r: {min: number; max: number; step: number}) =>
   typeof v === "number" && Number.isFinite(v) && v >= r.min && v <= r.max
     ? r.min + Math.round((v - r.min) / r.step) * r.step
@@ -96,6 +102,7 @@ export const normalizeSettings = (raw: unknown): Settings => {
   const r = isRecord(raw) ? raw : {};
   const d = DEFAULT_SETTINGS;
   return {
+    lang: lang(r.lang, d.lang),
     color: typeof r.color === "string" && /^#[0-9a-f]{6}$/i.test(r.color) ? r.color.toUpperCase() : d.color,
     readingAnimation: bool(r.readingAnimation, d.readingAnimation),
     pomodoroFocusMin: stepped(r.pomodoroFocusMin, d.pomodoroFocusMin, POMODORO_FOCUS),

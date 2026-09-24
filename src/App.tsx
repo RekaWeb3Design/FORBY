@@ -21,6 +21,7 @@ import {logError} from "./log";
 import {createMotion} from "./motion";
 import type {Settings} from "./prefs";
 import {TRAY_FIND_EVENT, writeLastDuration, writePosition} from "./store";
+import {strings} from "./strings";
 import {useAlarms} from "./useAlarms";
 import {useDragFling} from "./useDragFling";
 import {useFoby, type OnTimerEvent} from "./useFoby";
@@ -53,6 +54,7 @@ function App({initialSettings, initialDurationMin}: AppProps) {
   const {state, view, orbClick, pickChip, wheel, submitDuration} = useFoby(
     initialDurationMin,
     {focusMin: settings.pomodoroFocusMin, breakMin: settings.pomodoroBreakMin},
+    settings.lang,
     (...args) => timerEventRef.current?.(...args),
   );
   const orbRef = useRef<HTMLDivElement>(null);
@@ -78,6 +80,13 @@ function App({initialSettings, initialDurationMin}: AppProps) {
   unlockRef.current = alarms.unlockAudio;
   clickedRef.current = alarms.clicked;
   const ignoreRef = useRef<boolean | null>(null);
+
+  // Tray menu and settings window title in the chosen language (the Rust side starts with neutral defaults)
+  useEffect(() => {
+    const t = strings[settings.lang];
+    invoke("set_tray_labels", {settings: t.traySettings, find: t.trayFind, quit: t.trayQuit, windowTitle: t.settingsWindowTitle})
+      .catch((err) => logError("setting the tray labels failed", err));
+  }, [settings.lang]);
 
   // Start with Windows: the registry entry follows the setting (the Rust side skips it in dev)
   useEffect(() => {
@@ -142,7 +151,7 @@ function App({initialSettings, initialDurationMin}: AppProps) {
       <button
         className="settings-btn"
         data-hit="circle"
-        aria-label="Beállítások"
+        aria-label={strings[settings.lang].settingsButton}
         style={{left: BTN_LEFT, top: BTN_TOP, width: SETTINGS_BTN_SIZE, height: SETTINGS_BTN_SIZE}}
         onClick={toggleSettings}
       >

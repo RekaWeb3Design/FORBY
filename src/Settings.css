@@ -8,6 +8,7 @@ body {font: 12px/1.35 "Segoe UI", system-ui, sans-serif; color: var(--ink); user
   border: 1px solid var(--outline); border-radius: 12px; background: rgba(255, 255, 255, 0.97);
 }
 
+.lang-row {margin-bottom: 10px;}
 .head {display: flex; align-items: center; gap: 8px; margin-bottom: 10px;}
 .tabs {display: flex; flex: 1; gap: 2px; padding: 2px; border-radius: 8px; background: #F1EFE8;}
 .tab {

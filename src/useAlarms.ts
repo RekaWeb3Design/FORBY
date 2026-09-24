@@ -9,6 +9,7 @@ import {logError, logInfo} from "./log";
 import {customId, type AlarmEvent, type Settings} from "./prefs";
 import {createAudio, decodeSound, eventVolume, playSound} from "./sounds";
 import {ALARM_TEST_EVENT, loadSound, SOUND_LIBRARY_EVENT, writePosition, type AlarmTest} from "./store";
+import {strings} from "./strings";
 import type {AnimateTo} from "./useDragFling";
 import type {OnTimerEvent} from "./useFoby";
 import {useWindowEvent} from "./useSettings";
@@ -168,7 +169,7 @@ export const useAlarms = (settings: Settings, ui: Ui, animateTo: AnimateTo) => {
     void play("timeUp");
     const repeat = window.setInterval(() => void play("timeUp"), ALARM_REPEAT_MS);
     flash(false);
-    if (s.notification) void notify("Lejárt az idő");
+    if (s.notification) void notify(strings[s.lang].toastTimeUp);
     if (s.jumpToCursor) void jump();
     return () => {
       clearInterval(repeat);
@@ -183,12 +184,12 @@ export const useAlarms = (settings: Settings, ui: Ui, animateTo: AnimateTo) => {
       void play("timeUp");
       if (snap.goalLaps !== 1) return;
       flash(true);
-      if (s.notification) void notify(`Elérted a célt (${formatMinutes(session.targetMs / 60_000)})`);
+      if (s.notification) void notify(strings[s.lang].toastGoalReached(formatMinutes(session.targetMs / 60_000)));
     }
     if (event === "pomodoroSwitch") {
       void play(snap.phase === "break" ? "breakStart" : "backToWork");
       flash(true);
-      if (s.notification) void notify(snap.phase === "break" ? "Szünet következik" : "Vissza a fókuszhoz");
+      if (s.notification) void notify(snap.phase === "break" ? strings[s.lang].toastBreak : strings[s.lang].toastBackToFocus);
     }
   }, [play, flash]);
 
@@ -196,7 +197,7 @@ export const useAlarms = (settings: Settings, ui: Ui, animateTo: AnimateTo) => {
   useWindowEvent<AlarmTest>(ALARM_TEST_EVENT, (test) => {
     logInfo(`test: ${test}`);
     if (test === "flash") startFlash(TEST_FLASH_MS);
-    if (test === "toast") void notify("Teszt értesítés");
+    if (test === "toast") void notify(strings[settingsRef.current.lang].toastTest);
     if (test === "jump") window.setTimeout(() => void jump(true), TEST_JUMP_DELAY_MS);
   });
 

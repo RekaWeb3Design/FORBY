@@ -18,6 +18,7 @@ import {
   type SoundRef,
 } from "./prefs";
 import {CUSTOM_EXTS, CUSTOM_MAX_BYTES, CUSTOM_MAX_COUNT, CUSTOM_MAX_SEC, decodeSound, eventVolume, playSound} from "./sounds";
+import {LANGS, strings, type Lang, type Strings} from "./strings";
 import {
   ALARM_TEST_EVENT,
   deleteSound,
@@ -42,16 +43,15 @@ const PANEL_GAP = 12; // logical px between the ring and the panel
 const BLUR_GRACE_MS = 150; // focus may come back right away (e.g. a native dialog closing)
 const RECORD_MAX_SEC = 5;
 const RECORD_MIME = "audio/webm;codecs=opus";
-const NEW_SOUND_NAME = "Saját hang"; // recordings are named "Saját hang N", the smallest free N
 
 type Tab = "look" | "alerts";
 type Status = {text: string; error: boolean};
 
 // Dev only: fire each signal in the main window right away; the jump waits 3 s so the cursor can move away
-const ALARM_TESTS: {id: AlarmTest; label: string}[] = [
-  {id: "flash", label: "Villogás"},
-  {id: "toast", label: "Értesítés"},
-  {id: "jump", label: "Odaugrás"},
+const ALARM_TESTS: {id: AlarmTest; label: keyof Pick<Strings, "testFlash" | "testToast" | "testJump">}[] = [
+  {id: "flash", label: "testFlash"},
+  {id: "toast", label: "testToast"},
+  {id: "jump", label: "testJump"},
 ];
 const sendTest = (test: AlarmTest) => {
   emitTo(MAIN_LABEL, ALARM_TEST_EVENT, test).catch((err) => logError("sending the alarm test failed", err));
@@ -91,12 +91,16 @@ const placeAndShow = async (w: number, h: number) => {
 
 const newSoundId = () => `${Date.now().toString(36)}${Math.floor(Math.random() * 1296).toString(36)}`;
 const cleanName = (name: string) => name.trim().slice(0, SOUND_NAME_MAX).trim();
-const nextSoundName = (library: LibrarySound[]) => {
+// Recordings are named "Saját hang N" / "Custom sound N", the smallest free N
+const nextSoundName = (library: LibrarySound[], t: Strings) => {
   let n = 1;
-  while (library.some((s) => s.name === `${NEW_SOUND_NAME} ${n}`)) n++;
-  return `${NEW_SOUND_NAME} ${n}`;
+  while (library.some((s) => s.name === t.newSoundName(n))) n++;
+  return t.newSoundName(n);
 };
-const soundLabel = (id: string) => SOUNDS.find((s) => s.id === id)?.label ?? id;
+const soundLabel = (id: string, t: Strings) => {
+  const key = SOUNDS.find((s) => s.id === id)?.label;
+  return key ? t[key] : id;
+};
 
 const Row = ({label, children}: {label: string; children: ReactNode}) => (
   <div className="row">
@@ -128,13 +132,13 @@ const Slider = ({label, value, min, max, step, unit, onChange}: SliderProps) => 
 );
 
 // Built-in sounds, then the library (grouped only when there is one)
-const SoundOptions = ({library}: {library: LibrarySound[]}) => {
-  const builtin = SOUNDS.map((s) => <option key={s.id} value={s.id}>{s.label}</option>);
+const SoundOptions = ({library, t}: {library: LibrarySound[]; t: Strings}) => {
+  const builtin = SOUNDS.map((s) => <option key={s.id} value={s.id}>{t[s.label]}</option>);
   if (!library.length) return <>{builtin}</>;
   return (
     <>
-      <optgroup label="Beépített">{builtin}</optgroup>
-      <optgroup label="Saját hangok">
+      <optgroup label={t.builtinSounds}>{builtin}</optgroup>
+      <optgroup label={t.customSounds}>
         {library.map((s) => <option key={s.id} value={customRef(s.id)}>{s.name}</option>)}
       </optgroup>
     </>
@@ -246,6 +250,8 @@ export default function SettingsApp() {
 
   if (!settings) return null;
 
+  const t = strings[settings.lang];
+
   // Every change is saved and sent to the main window at once
   const update = (patch: Partial<Settings>) => {
     const next = {...settings, ...patch};
@@ -291,32 +297,32 @@ export default function SettingsApp() {
       playSound(ctx, ref, settings.volume * share, custom);
     } catch (err) {
       logError("preview failed", err);
-      setStatus({text: "A hang nem játszható le", error: true});
+      setStatus({text: t.errPlayback, error: true});
     }
   };
 
   // Checks a recorded or uploaded sound and adds it to the library; it is not assigned to any event
   // name null: "Saját hang N"
   const acceptSound = async (bytes: ArrayBuffer, ext: string, name: string | null) => {
-    if (library.length >= CUSTOM_MAX_COUNT) return setStatus({text: `Legfeljebb ${CUSTOM_MAX_COUNT} saját hang lehet`, error: true});
-    if (bytes.byteLength > CUSTOM_MAX_BYTES) return setStatus({text: "A fájl nagyobb 5 MB-nál", error: true});
+    if (library.length >= CUSTOM_MAX_COUNT) return setStatus({text: t.errTooMany(CUSTOM_MAX_COUNT), error: true});
+    if (bytes.byteLength > CUSTOM_MAX_BYTES) return setStatus({text: t.errTooBig, error: true});
     let buffer: AudioBuffer;
     try {
       buffer = await decodeSound(bytes);
     } catch {
-      return setStatus({text: "Ez a fájl nem lejátszható hang", error: true});
+      return setStatus({text: t.errNotAudio, error: true});
     }
-    if (buffer.duration > CUSTOM_MAX_SEC + 0.05) return setStatus({text: `A hang hosszabb ${CUSTOM_MAX_SEC} mp-nél`, error: true});
+    if (buffer.duration > CUSTOM_MAX_SEC + 0.05) return setStatus({text: t.errTooLong(CUSTOM_MAX_SEC), error: true});
     const id = newSoundId();
-    name ??= nextSoundName(library);
+    name ??= nextSoundName(library, t);
     try {
       await saveSound(id, bytes, ext);
     } catch (err) {
       logError("saving the custom sound failed", err);
-      return setStatus({text: "A mentés nem sikerült", error: true});
+      return setStatus({text: t.errSave, error: true});
     }
     updateLibrary([...library, {id, name, durationSec: Math.round(buffer.duration * 10) / 10}]);
-    setStatus({text: `„${name}” bekerült a könyvtárba. Eseményhez a hangválasztókban rendelheted hozzá.`, error: false});
+    setStatus({text: t.statusAdded(name), error: false});
   };
   acceptRef.current = acceptSound;
 
@@ -332,7 +338,7 @@ export default function SettingsApp() {
       stream = await navigator.mediaDevices.getUserMedia({audio: true});
     } catch (err) {
       logError("microphone access failed", err);
-      return setStatus({text: "Nincs hozzáférés a mikrofonhoz", error: true});
+      return setStatus({text: t.errMic, error: true});
     } finally {
       pickerOpenRef.current = false;
     }
@@ -369,7 +375,7 @@ export default function SettingsApp() {
   const onFile = async (file: File | undefined) => {
     if (!file) return;
     const ext = file.name.split(".").pop()?.toLowerCase() ?? "";
-    if (!CUSTOM_EXTS.includes(ext)) return setStatus({text: `Nem támogatott fájltípus (${CUSTOM_EXTS.join(", ")})`, error: true});
+    if (!CUSTOM_EXTS.includes(ext)) return setStatus({text: t.errFileType(CUSTOM_EXTS.join(", ")), error: true});
     const name = cleanName(file.name.replace(/\.[^.]*$/, "")) || null;
     await acceptSound(await file.arrayBuffer(), ext, name);
   };
@@ -398,7 +404,7 @@ export default function SettingsApp() {
       await deleteSound(sound.id);
     } catch (err) {
       logError("deleting the custom sound failed", err);
-      return setStatus({text: "A törlés nem sikerült", error: true});
+      return setStatus({text: t.errDelete, error: true});
     }
     const ref = customRef(sound.id);
     const used = ALARM_EVENTS.filter((e) => settings.sounds[e.id] === ref);
@@ -408,28 +414,34 @@ export default function SettingsApp() {
       update({sounds});
     }
     updateLibrary(library.filter((s) => s.id !== sound.id));
-    const switched = used.length ? ` ${used.map((e) => e.label).join(", ")}: ${soundLabel(FALLBACK_SOUND)} lett.` : "";
-    setStatus({text: `„${sound.name}” törölve.${switched}`, error: false});
+    const switched = used.length ? t.statusSwitched(used.map((e) => t[e.label]).join(", "), soundLabel(FALLBACK_SOUND, t)) : "";
+    setStatus({text: `${t.statusDeleted(sound.name)}${switched}`, error: false});
   };
 
   const libraryStatus: Status | null = status
-    ?? (libraryFull ? {text: `Legfeljebb ${CUSTOM_MAX_COUNT} saját hang lehet, újhoz törölj egyet.`, error: false}
-      : library.length ? null : {text: "Még nincs saját hang.", error: false});
+    ?? (libraryFull ? {text: t.statusFull(CUSTOM_MAX_COUNT), error: false}
+      : library.length ? null : {text: t.statusEmpty, error: false});
 
   return (
     <div className="panel" ref={panelRef}>
+      <div className="row lang-row">
+        <span className="row-label">{t.language}</span>
+        <select aria-label={t.language} value={settings.lang} onChange={(e) => update({lang: e.target.value as Lang})}>
+          {LANGS.map((l) => <option key={l.id} value={l.id}>{l.label}</option>)}
+        </select>
+      </div>
       <div className="head">
         <div className="tabs" role="tablist">
-          <button role="tab" aria-selected={tab === "look"} className="tab" onClick={() => switchTab("look")}>Megjelenés és időzítés</button>
-          <button role="tab" aria-selected={tab === "alerts"} className="tab" onClick={() => switchTab("alerts")}>Riasztások</button>
+          <button role="tab" aria-selected={tab === "look"} className="tab" onClick={() => switchTab("look")}>{t.tabLook}</button>
+          <button role="tab" aria-selected={tab === "alerts"} className="tab" onClick={() => switchTab("alerts")}>{t.tabAlerts}</button>
         </div>
-        <button className="close" aria-label="Bezárás" onClick={() => void close()}>×</button>
+        <button className="close" aria-label={t.close} onClick={() => void close()}>×</button>
       </div>
 
       <div className="pages">
         <section className={`page${tab === "look" ? "" : " inactive"}`} aria-hidden={tab !== "look"}>
           <div className="field">
-            <span className="row-label">Gömb színe</span>
+            <span className="row-label">{t.orbColor}</span>
             <div className="swatches">
               {COLOR_PRESETS.map((c) => (
                 <button
@@ -440,10 +452,10 @@ export default function SettingsApp() {
                   onClick={() => update({color: c})}
                 />
               ))}
-              <label className={`swatch custom${customColor ? " selected" : ""}`} style={customColor ? {background: settings.color} : undefined} title="Egyedi szín">
+              <label className={`swatch custom${customColor ? " selected" : ""}`} style={customColor ? {background: settings.color} : undefined} title={t.customColor}>
                 <input
                   type="color"
-                  aria-label="Egyedi szín"
+                  aria-label={t.customColor}
                   value={settings.color.toLowerCase()}
                   onClick={() => {pickerOpenRef.current = true;}}
                   onChange={(e) => update({color: e.target.value.toUpperCase()})}
@@ -451,25 +463,25 @@ export default function SettingsApp() {
               </label>
             </div>
           </div>
-          <SwitchRow label="Olvasó animáció fókusz alatt" checked={settings.readingAnimation} onChange={(v) => update({readingAnimation: v})} />
-          <Slider label="Pomodoro fókusz" unit="perc" {...POMODORO_FOCUS} value={settings.pomodoroFocusMin} onChange={(v) => update({pomodoroFocusMin: v})} />
-          <Slider label="Pomodoro szünet" unit="perc" {...POMODORO_BREAK} value={settings.pomodoroBreakMin} onChange={(v) => update({pomodoroBreakMin: v})} />
-          <SwitchRow label="Játék mód" checked={settings.playMode} onChange={(v) => update({playMode: v})} />
-          <SwitchRow label="Indítás a géppel" checked={settings.autostart} onChange={(v) => update({autostart: v})} />
+          <SwitchRow label={t.readingAnimation} checked={settings.readingAnimation} onChange={(v) => update({readingAnimation: v})} />
+          <Slider label={t.pomodoroFocus} unit={t.minutes} {...POMODORO_FOCUS} value={settings.pomodoroFocusMin} onChange={(v) => update({pomodoroFocusMin: v})} />
+          <Slider label={t.pomodoroBreak} unit={t.minutes} {...POMODORO_BREAK} value={settings.pomodoroBreakMin} onChange={(v) => update({pomodoroBreakMin: v})} />
+          <SwitchRow label={t.playMode} checked={settings.playMode} onChange={(v) => update({playMode: v})} />
+          <SwitchRow label={t.autostart} checked={settings.autostart} onChange={(v) => update({autostart: v})} />
         </section>
 
         <section className={`page${tab === "alerts" && !showLibrary ? "" : " inactive"}`} aria-hidden={tab !== "alerts" || showLibrary}>
           <div className="field">
             <div className="field-head">
-              <span className="row-label">Hang</span>
+              <span className="row-label">{t.sound}</span>
               <span className="sound-head">
                 <span className="field-value">{Math.round(settings.volume * 100)} %</span>
-                <Switch label="Hang" checked={settings.soundOn} onChange={(v) => update({soundOn: v})} />
+                <Switch label={t.sound} checked={settings.soundOn} onChange={(v) => update({soundOn: v})} />
               </span>
             </div>
             <input
               type="range"
-              aria-label="Hangerő"
+              aria-label={t.volume}
               min={0}
               max={100}
               step={5}
@@ -479,20 +491,20 @@ export default function SettingsApp() {
           </div>
           <div className="events">
             {ALARM_EVENTS.map(({id, label}) => (
-              <Row key={id} label={label}>
+              <Row key={id} label={t[label]}>
                 <div className="sound">
                   <select
-                    aria-label={`${label}: hang`}
+                    aria-label={t.eventSoundLabel(t[label])}
                     value={settings.sounds[id]}
                     disabled={!settings.soundOn}
                     onChange={(e) => setEventSound(id, e.target.value as SoundRef)}
                   >
-                    <SoundOptions library={library} />
+                    <SoundOptions library={library} t={t} />
                   </select>
                   <button
                     className="icon-btn"
-                    aria-label={`${label}: előhallgatás`}
-                    title="Előhallgatás"
+                    aria-label={t.previewLabel(t[label])}
+                    title={t.preview}
                     disabled={!settings.soundOn}
                     onClick={() => void preview(settings.sounds[id], eventVolume(id))}
                   >▶</button>
@@ -501,17 +513,17 @@ export default function SettingsApp() {
             ))}
           </div>
           <button className="row nav-row" onClick={openLibrary}>
-            <span className="row-label">Saját hangok</span>
+            <span className="row-label">{t.customSounds}</span>
             <span className="field-value">{library.length} / {CUSTOM_MAX_COUNT} ›</span>
           </button>
-          <SwitchRow label="Tálca-villogás" checked={settings.flashTaskbar} onChange={(v) => update({flashTaskbar: v})} />
-          <SwitchRow label="Windows értesítés" checked={settings.notification} onChange={(v) => update({notification: v})} />
-          <SwitchRow label="Odaugrik a kurzorhoz" checked={settings.jumpToCursor} onChange={(v) => update({jumpToCursor: v})} />
+          <SwitchRow label={t.flashTaskbar} checked={settings.flashTaskbar} onChange={(v) => update({flashTaskbar: v})} />
+          <SwitchRow label={t.notification} checked={settings.notification} onChange={(v) => update({notification: v})} />
+          <SwitchRow label={t.jumpToCursor} checked={settings.jumpToCursor} onChange={(v) => update({jumpToCursor: v})} />
           {import.meta.env.DEV && (
             <div className="field">
-              <span className="row-label">Teszt (csak fejlesztői módban)</span>
+              <span className="row-label">{t.devTest}</span>
               <div className="buttons">
-                {ALARM_TESTS.map(({id, label}) => <button key={id} className="btn" onClick={() => sendTest(id)}>{label}</button>)}
+                {ALARM_TESTS.map(({id, label}) => <button key={id} className="btn" onClick={() => sendTest(id)}>{t[label]}</button>)}
               </div>
             </div>
           )}
@@ -522,14 +534,14 @@ export default function SettingsApp() {
         {showLibrary && (
           <section
             className="library"
-            aria-label="Saját hangok"
+            aria-label={t.customSounds}
             onPointerDown={(e) => {
               if (confirmDelete !== null && !(e.target as Element).closest("[data-confirm]")) setConfirmDelete(null);
             }}
           >
             <div className="library-head">
-              <button className="icon-btn back" aria-label="Vissza" title="Vissza" onClick={leaveLibrary}>‹</button>
-              <span className="library-title">Saját hangok</span>
+              <button className="icon-btn back" aria-label={t.back} title={t.back} onClick={leaveLibrary}>‹</button>
+              <span className="library-title">{t.customSounds}</span>
               <span className="field-value">{library.length} / {CUSTOM_MAX_COUNT}</span>
             </div>
             <ul className="library-list">
@@ -538,7 +550,7 @@ export default function SettingsApp() {
                   {renaming?.id === sound.id ? (
                     <input
                       className="rename"
-                      aria-label="Új név"
+                      aria-label={t.newName}
                       autoFocus
                       maxLength={SOUND_NAME_MAX}
                       value={renaming.draft}
@@ -554,23 +566,23 @@ export default function SettingsApp() {
                       onBlur={() => finishRename(true)}
                     />
                   ) : (
-                    <button className="sound-name" title={`${sound.name} (átnevezés)`} onClick={() => startRename(sound)}>{sound.name}</button>
+                    <button className="sound-name" title={t.renameTitle(sound.name)} onClick={() => startRename(sound)}>{sound.name}</button>
                   )}
-                  <span className="field-value">{sound.durationSec.toLocaleString("hu-HU")} mp</span>
-                  <button className="icon-btn" aria-label={`${sound.name}: előhallgatás`} title="Előhallgatás" onClick={() => void preview(customRef(sound.id))}>▶</button>
+                  <span className="field-value">{sound.durationSec.toLocaleString(t.locale)} {t.seconds}</span>
+                  <button className="icon-btn" aria-label={t.previewLabel(sound.name)} title={t.preview} onClick={() => void preview(customRef(sound.id))}>▶</button>
                   {confirmDelete === sound.id ? (
-                    <button className="icon-btn confirm" data-confirm onClick={() => void remove(sound)}>Törlöd?</button>
+                    <button className="icon-btn confirm" data-confirm onClick={() => void remove(sound)}>{t.confirmDelete}</button>
                   ) : (
-                    <button className="icon-btn remove" aria-label={`${sound.name}: törlés`} title="Törlés" onClick={() => setConfirmDelete(sound.id)}>×</button>
+                    <button className="icon-btn remove" aria-label={t.deleteLabel(sound.name)} title={t.delete} onClick={() => setConfirmDelete(sound.id)}>×</button>
                   )}
                 </li>
               ))}
             </ul>
             <div className="buttons">
               <button className={`btn${recordLeft !== null ? " recording" : ""}`} disabled={libraryFull && recordLeft === null} onClick={() => void record()}>
-                {recordLeft !== null ? `Leállítás (${recordLeft})` : `Felvétel (max ${RECORD_MAX_SEC} mp)`}
+                {recordLeft !== null ? t.recordStop(recordLeft) : t.record(RECORD_MAX_SEC)}
               </button>
-              <button className="btn" disabled={libraryFull || recordLeft !== null} onClick={upload}>Fájl feltöltése</button>
+              <button className="btn" disabled={libraryFull || recordLeft !== null} onClick={upload}>{t.uploadFile}</button>
               <input
                 ref={fileRef}
                 type="file"

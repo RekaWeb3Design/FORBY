@@ -1,9 +1,10 @@
+use std::sync::Mutex;
 use std::time::Duration;
 use tauri::ipc::{InvokeBody, Request, Response};
 use tauri::image::Image;
 use tauri::menu::{Menu, MenuItem, PredefinedMenuItem};
 use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
-use tauri::{AppHandle, Emitter, Manager, WebviewUrl, WebviewWindow, WebviewWindowBuilder, WindowEvent};
+use tauri::{AppHandle, Emitter, Manager, State, WebviewUrl, WebviewWindow, WebviewWindowBuilder, WindowEvent};
 use tauri_plugin_autostart::ManagerExt;
 
 // The main window starts hidden and the frontend shows it after restoring its position.
@@ -13,12 +14,27 @@ const SHOW_FALLBACK: Duration = Duration::from_secs(6);
 const MAIN_LABEL: &str = "main";
 const SETTINGS_LABEL: &str = "settings";
 
-// Tray menu items; "Beállítások" and "FORBY megkeresése" are done by the main window (it knows the layout)
+// Tray menu items; settings and find are done by the main window (it knows the layout)
 const TRAY_SETTINGS: &str = "settings";
 const TRAY_FIND: &str = "find";
 const TRAY_QUIT: &str = "quit";
 const TRAY_SETTINGS_EVENT: &str = "tray-settings";
 const TRAY_FIND_EVENT: &str = "tray-find";
+
+// User-visible texts live in the frontend (strings.ts); these neutral defaults show only until
+// the main window sends the texts of the chosen language (set_tray_labels)
+const DEFAULT_TRAY_SETTINGS: &str = "Settings";
+const DEFAULT_TRAY_FIND: &str = "Find FORBY";
+const DEFAULT_TRAY_QUIT: &str = "Quit";
+const DEFAULT_WINDOW_TITLE: &str = "FORBY";
+
+// Tray menu item handles and the settings window title, managed as app state
+struct TrayLabels {
+    settings: MenuItem<tauri::Wry>,
+    find: MenuItem<tauri::Wry>,
+    quit: MenuItem<tauri::Wry>,
+    window_title: Mutex<String>,
+}
 
 // Simplified tray icon (icons/source/tray.svg) pre-rendered per size; 16 px at 100% display scaling
 const TRAY_ICON_BASE: f64 = 16.0;
@@ -50,6 +66,7 @@ async fn open_settings(app: AppHandle, query: String) -> Result<(), String> {
     if app.get_webview_window(SETTINGS_LABEL).is_some() {
         return Ok(());
     }
+    let title = app.state::<TrayLabels>().window_title.lock().map_err(|e| e.to_string())?.clone();
     let browser_args = app
         .config()
         .app
@@ -59,7 +76,7 @@ async fn open_settings(app: AppHandle, query: String) -> Result<(), String> {
         .and_then(|w| w.additional_browser_args.clone());
     let url = WebviewUrl::App(format!("index.html?{query}").into());
     let mut builder = WebviewWindowBuilder::new(&app, SETTINGS_LABEL, url)
-        .title("FORBY – Beállítások")
+        .title(&title)
         .inner_size(300.0, 400.0)
         .visible(false)
         .decorations(false)
@@ -377,6 +394,22 @@ fn set_autostart(app: AppHandle, enabled: bool) -> Result<(), String> {
     }
 }
 
+// Texts of the tray menu and the settings window title, from the frontend in the chosen language
+#[tauri::command]
+fn set_tray_labels(
+    state: State<'_, TrayLabels>,
+    settings: String,
+    find: String,
+    quit: String,
+    window_title: String,
+) -> Result<(), String> {
+    state.settings.set_text(&settings).map_err(|e| e.to_string())?;
+    state.find.set_text(&find).map_err(|e| e.to_string())?;
+    state.quit.set_text(&quit).map_err(|e| e.to_string())?;
+    *state.window_title.lock().map_err(|e| e.to_string())? = window_title;
+    Ok(())
+}
+
 fn show_main(app: &AppHandle) {
     if let Some(win) = app.get_webview_window(MAIN_LABEL) {
         let _ = win.show();
@@ -396,16 +429,12 @@ fn tray_icon(app: &AppHandle) -> tauri::Result<Image<'static>> {
     Image::from_bytes(bytes)
 }
 
-fn create_tray(app: &AppHandle) -> tauri::Result<()> {
-    let menu = Menu::with_items(
-        app,
-        &[
-            &MenuItem::with_id(app, TRAY_SETTINGS, "Beállítások", true, None::<&str>)?,
-            &MenuItem::with_id(app, TRAY_FIND, "FORBY megkeresése", true, None::<&str>)?,
-            &PredefinedMenuItem::separator(app)?,
-            &MenuItem::with_id(app, TRAY_QUIT, "Kilépés", true, None::<&str>)?,
-        ],
-    )?;
+// Builds the tray; returns the menu item handles so the frontend can retitle them
+fn create_tray(app: &AppHandle) -> tauri::Result<TrayLabels> {
+    let settings = MenuItem::with_id(app, TRAY_SETTINGS, DEFAULT_TRAY_SETTINGS, true, None::<&str>)?;
+    let find = MenuItem::with_id(app, TRAY_FIND, DEFAULT_TRAY_FIND, true, None::<&str>)?;
+    let quit = MenuItem::with_id(app, TRAY_QUIT, DEFAULT_TRAY_QUIT, true, None::<&str>)?;
+    let menu = Menu::with_items(app, &[&settings, &find, &PredefinedMenuItem::separator(app)?, &quit])?;
     TrayIconBuilder::with_id("forby")
         .icon(tray_icon(app)?)
         .tooltip("FORBY")
@@ -431,7 +460,7 @@ fn create_tray(app: &AppHandle) -> tauri::Result<()> {
             }
         })
         .build(app)?;
-    Ok(())
+    Ok(TrayLabels { settings, find, quit, window_title: Mutex::new(DEFAULT_WINDOW_TITLE.into()) })
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -442,7 +471,8 @@ pub fn run() {
         .plugin(tauri_plugin_store::Builder::new().build())
         .plugin(tauri_plugin_autostart::Builder::new().app_name("FORBY").build())
         .setup(|app| {
-            create_tray(app.handle())?;
+            let labels = create_tray(app.handle())?;
+            app.manage(labels);
             let handle = app.handle().clone();
             std::thread::spawn(move || {
                 std::thread::sleep(SHOW_FALLBACK);
@@ -470,7 +500,8 @@ pub fn run() {
             log,
             flash_taskbar,
             show_toast,
-            set_autostart
+            set_autostart,
+            set_tray_labels
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

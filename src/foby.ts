@@ -2,6 +2,7 @@
 import type {FaceState} from "./Face";
 import {DURATION_MAX, DURATION_MIN, formatElapsed, formatMinutes, formatRemaining} from "./format";
 import {isOvertime, pauseSession, resumeSession, snapshot, startSession, syncSession, type Mode, type Session} from "./timer";
+import {strings, type Lang, type Strings} from "./strings";
 
 export type Ui = "idle" | "pickMode" | "pickDur" | "run" | "paused" | "alarm" | "summary";
 
@@ -29,20 +30,20 @@ export type FobyAction =
 
 const DURATION_CHIPS = [5, 15, 25, 45, 60];
 
-const CHIPS: Partial<Record<Ui, Chip[]>> = {
+const CHIPS = (t: Strings): Partial<Record<Ui, Chip[]>> => ({
   pickMode: [
-    {id: "timer", label: "Timer"},
-    {id: "stopwatch", label: "Stopper"},
-    {id: "goal", label: "Cél-stopper"},
-    {id: "pomodoro", label: "Pomodoro"},
+    {id: "timer", label: t.chipTimer},
+    {id: "stopwatch", label: t.chipStopwatch},
+    {id: "goal", label: t.chipGoal},
+    {id: "pomodoro", label: t.chipPomodoro},
   ],
   pickDur: [
-    {id: "back", label: "Vissza"},
-    {id: "custom", label: "Egyéni"}, // opens the duration input; handled by the UI, the state stays
+    {id: "back", label: t.chipBack},
+    {id: "custom", label: t.chipCustom}, // opens the duration input; handled by the UI, the state stays
     ...DURATION_CHIPS.map((m): Chip => ({id: `dur:${m}`, label: String(m)})),
   ],
-  paused: [{id: "resume", label: "Folytat"}, {id: "stop", label: "Leállít"}],
-};
+  paused: [{id: "resume", label: t.chipResume}, {id: "stop", label: t.chipStop}],
+});
 
 export const createState = (durationMin: number, pomodoro: Pomodoro): FobyState => ({
   ui: "idle",
@@ -128,13 +129,14 @@ export type FobyView = {
 };
 
 // What to show at the state's last tick (paused and finished sessions are frozen anyway)
-export const describe = (state: FobyState): FobyView => {
-  const view: FobyView = {chips: CHIPS[state.ui] ?? [], big: null, alert: false, lines: [], editable: false, face: "idle", smile: false};
+export const describe = (state: FobyState, lang: Lang): FobyView => {
+  const t = strings[lang];
+  const view: FobyView = {chips: CHIPS(t)[state.ui] ?? [], big: null, alert: false, lines: [], editable: false, face: "idle", smile: false};
   const s = state.session;
 
-  if (state.ui === "pickMode") return {...view, lines: ["Válassz módot"]};
+  if (state.ui === "pickMode") return {...view, lines: [t.linePickMode]};
   if (state.ui === "pickDur") {
-    return {...view, big: formatMinutes(state.durationMin), lines: ["Görgess, vagy kattints a számra"], editable: true};
+    return {...view, big: formatMinutes(state.durationMin), lines: [t.linePickDur], editable: true};
   }
   if (state.ui === "idle" || !s) return view;
 
@@ -147,7 +149,7 @@ export const describe = (state: FobyState): FobyView => {
       ...view,
       big: over >= 1000 ? `-${formatElapsed(over)}` : "0:00",
       alert: true,
-      lines: [`Lejárt, cél ${target}`, "Kattints a lezáráshoz"],
+      lines: [t.lineAlarm(target), t.lineAlarmClose],
       face: "alarm",
     };
   }
@@ -155,11 +157,11 @@ export const describe = (state: FobyState): FobyView => {
   if (state.ui === "summary") {
     const summary = {...view, face: "idle" as const, smile: true};
     if (s.mode === "pomodoro") {
-      return {...summary, big: formatElapsed(snap.focusTotalMs), lines: ["Fókuszidő", `${snap.completedPomodoros} teljes pomodoro`]};
+      return {...summary, big: formatElapsed(snap.focusTotalMs), lines: [t.lineFocusTime, t.linePomodoros(snap.completedPomodoros)]};
     }
-    if (s.mode === "stopwatch") return {...summary, big: formatElapsed(snap.elapsedMs), lines: ["Összesen"]};
-    const rest = snap.remainingMs > 0 ? `${formatRemaining(snap.remainingMs)} maradt` : `Túlóra +${formatElapsed(-snap.remainingMs)}`;
-    return {...summary, big: formatElapsed(snap.elapsedMs), lines: [`Cél ${target}`, rest]};
+    if (s.mode === "stopwatch") return {...summary, big: formatElapsed(snap.elapsedMs), lines: [t.lineTotal]};
+    const rest = snap.remainingMs > 0 ? t.lineRemaining(formatRemaining(snap.remainingMs)) : t.lineOvertime(formatElapsed(-snap.remainingMs));
+    return {...summary, big: formatElapsed(snap.elapsedMs), lines: [t.lineGoal(target), rest]};
   }
 
   // run and paused
@@ -169,16 +171,16 @@ export const describe = (state: FobyState): FobyView => {
   let face: FaceState = "focus";
   if (s.mode === "timer") big = formatRemaining(Math.max(0, snap.remainingMs));
   if (s.mode === "goal") {
-    lines = [overtime ? `Cél ${target}, +${formatElapsed(snap.overtimeMs)}` : `Cél ${target}`];
+    lines = [overtime ? t.lineGoalOvertime(target, formatElapsed(snap.overtimeMs)) : t.lineGoal(target)];
     if (overtime) face = "overtime";
   }
   if (s.mode === "pomodoro") {
     big = formatRemaining(snap.phaseRemainingMs);
-    lines = [snap.phase === "break" ? "Szünet" : `Fókusz · ${snap.pomodoroIndex}.`];
+    lines = [snap.phase === "break" ? t.lineBreak : t.lineFocus(snap.pomodoroIndex)];
     if (snap.phase === "break") face = "break";
   }
   if (state.ui === "paused") {
-    lines = ["Szünetel"];
+    lines = [t.linePaused];
     face = "pause";
   }
   return {...view, big, lines, alert: overtime, face};

@@ -1,12 +1,13 @@
 import {useCallback, useEffect, useMemo, useReducer, useRef} from "react";
 import {createState, describe, reducer, type ChipId, type Pomodoro} from "./foby";
 import {detectEvents, nextTickDelay, snapshot, type Session, type Snapshot, type TimerEvent} from "./timer";
+import type {Lang} from "./strings";
 
 export type OnTimerEvent = (event: TimerEvent, snap: Snapshot, session: Session) => void;
 
 // State machine + once-a-second ticking aligned to whole seconds of active time.
 // onEvent reports timer events (the alarms hook in here in phase 5).
-export const useFoby = (initialDurationMin: number, pomodoro: Pomodoro, onEvent?: OnTimerEvent) => {
+export const useFoby = (initialDurationMin: number, pomodoro: Pomodoro, lang: Lang, onEvent?: OnTimerEvent) => {
   const [state, dispatch] = useReducer(reducer, undefined, () => createState(initialDurationMin, pomodoro));
 
   // Settings changes apply to the next session; the running one keeps its snapshot
@@ -14,7 +15,7 @@ export const useFoby = (initialDurationMin: number, pomodoro: Pomodoro, onEvent?
     dispatch({type: "settings", pomodoro: {focusMin: pomodoro.focusMin, breakMin: pomodoro.breakMin}});
   }, [pomodoro.focusMin, pomodoro.breakMin]);
 
-  const view = useMemo(() => describe(state), [state]);
+  const view = useMemo(() => describe(state, lang), [state, lang]);
 
   const ticking = !!state.session && (state.ui === "run" || state.ui === "alarm");
   useEffect(() => {
