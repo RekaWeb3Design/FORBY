@@ -1,5 +1,5 @@
 import {useCallback, useEffect, useMemo, useReducer, useRef} from "react";
-import {createState, describe, reducer, type ChipId, type Pomodoro} from "./foby";
+import {canApply, createState, describe, reducer, type ChipId, type FobyState, type Intent, type Pomodoro} from "./foby";
 import {detectEvents, nextTickDelay, snapshot, type Session, type Snapshot, type TimerEvent} from "./timer";
 import type {Lang} from "./strings";
 
@@ -14,6 +14,10 @@ export const useFoby = (initialDurationMin: number, pomodoro: Pomodoro, lang: La
   useEffect(() => {
     dispatch({type: "settings", pomodoro: {focusMin: pomodoro.focusMin, breakMin: pomodoro.breakMin}});
   }, [pomodoro.focusMin, pomodoro.breakMin]);
+
+  // Latest rendered state for commands, read outside React's render cycle
+  const stateRef = useRef(state);
+  stateRef.current = state;
 
   const view = useMemo(() => describe(state, lang), [state, lang]);
 
@@ -46,5 +50,12 @@ export const useFoby = (initialDurationMin: number, pomodoro: Pomodoro, lang: La
     pickChip: useCallback((id: ChipId) => dispatch({type: "chip", id, now: Date.now()}), []),
     wheel: useCallback((delta: number) => dispatch({type: "wheel", delta}), []),
     submitDuration: useCallback((minutes: number) => dispatch({type: "submit", minutes, now: Date.now()}), []),
+    // Commands: false when the intent does not apply to the current state (nothing is dispatched then)
+    runIntent: useCallback((intent: Intent) => {
+      if (!canApply(stateRef.current, intent)) return false;
+      dispatch({type: "intent", intent, now: Date.now()});
+      return true;
+    }, []),
+    getState: useCallback((): FobyState => stateRef.current, []),
   };
 };
