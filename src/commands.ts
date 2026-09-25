@@ -1,5 +1,6 @@
 // Text commands: a registry of patterns per language and a resolver that maps typed text to one of them. Pure, no React.
 import type {FobyState, Intent} from "./foby";
+import {wordsToDigits} from "./numberWords";
 import {LANGS, type Lang} from "./strings";
 
 // lang is the language the pattern matched in; the reply is written in it
@@ -24,10 +25,10 @@ export const registerCommand = (cmd: Command): void => {
 
 export const getCommands = (): readonly Command[] => commands;
 
-// Lowercase, drop sentence punctuation (. ! ? , before a space or the end, so "2.5" stays), collapse spaces.
-// Accents stay. Later: number words ("five", "húsz") become digits here.
+// Lowercase, drop sentence punctuation (. ! ? , before a space or the end, so "2.5" stays), collapse spaces,
+// then number words to digits. Accents stay.
 export const normalize = (text: string): string =>
-  text.toLowerCase().replace(/[.!?,]+(?=\s|$)/g, "").replace(/\s+/g, " ").trim();
+  wordsToDigits(text.toLowerCase().replace(/[.!?,]+(?=\s|$)/g, "").replace(/\s+/g, " ").trim());
 
 // preferLang first, then the rest in LANGS order; without it, plain LANGS order
 const langOrder = (preferLang?: Lang): Lang[] => {
