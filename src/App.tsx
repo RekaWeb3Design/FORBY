@@ -3,6 +3,7 @@ import {invoke} from "@tauri-apps/api/core";
 import {availableMonitors, getCurrentWindow, PhysicalPosition, primaryMonitor} from "@tauri-apps/api/window";
 import {workAreaOf} from "./bounds";
 import Chips from "./Chips";
+import {runCommand} from "./commands";
 import Face from "./Face";
 import type {ChipId} from "./foby";
 import Ring from "./Ring";
@@ -28,6 +29,13 @@ import {useFoby, type OnTimerEvent} from "./useFoby";
 import {useSettings, useSettingsToggle, useWindowEvent} from "./useSettings";
 import "./App.css";
 
+// Dev only: type a command in the DevTools console, e.g. forby("timer 5 minutes")
+declare global {
+  interface Window {
+    forby?: (text: string) => string;
+  }
+}
+
 const BTN_ANGLE_RAD = (SETTINGS_BTN_ANGLE * Math.PI) / 180;
 const BTN_LEFT = ORB_CX + SETTINGS_BTN_DIST * Math.sin(BTN_ANGLE_RAD) - SETTINGS_BTN_SIZE / 2;
 const BTN_TOP = ORB_CY - SETTINGS_BTN_DIST * Math.cos(BTN_ANGLE_RAD) - SETTINGS_BTN_SIZE / 2;
@@ -51,7 +59,7 @@ function App({initialSettings, initialDurationMin}: AppProps) {
   const settings = useSettings(initialSettings);
   const toggleSettings = useSettingsToggle();
   const timerEventRef = useRef<OnTimerEvent | null>(null);
-  const {state, view, orbClick, pickChip, wheel, submitDuration} = useFoby(
+  const {state, view, orbClick, pickChip, wheel, submitDuration, runIntent, getState} = useFoby(
     initialDurationMin,
     {focusMin: settings.pomodoroFocusMin, breakMin: settings.pomodoroBreakMin},
     settings.lang,
@@ -87,6 +95,20 @@ function App({initialSettings, initialDurationMin}: AppProps) {
     invoke("set_tray_labels", {settings: t.traySettings, find: t.trayFind, quit: t.trayQuit, windowTitle: t.settingsWindowTitle})
       .catch((err) => logError("setting the tray labels failed", err));
   }, [settings.lang]);
+
+  // Dev console hook for testing text commands; the early return lets the production build drop all of it
+  useEffect(() => {
+    if (!import.meta.env.DEV) return;
+    const lang = settings.lang;
+    window.forby = (text: string) => {
+      const reply = runCommand(text, {getState, runIntent}, lang)?.reply ?? strings[lang].cmdNotUnderstood;
+      console.log(reply);
+      return reply;
+    };
+    return () => {
+      delete window.forby;
+    };
+  }, [settings.lang, getState, runIntent]);
 
   // Start with Windows: the registry entry follows the setting (the Rust side skips it in dev)
   useEffect(() => {
