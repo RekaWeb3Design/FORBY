@@ -7,6 +7,8 @@ use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent}
 use tauri::{AppHandle, Emitter, Manager, State, WebviewUrl, WebviewWindow, WebviewWindowBuilder, WindowEvent};
 use tauri_plugin_autostart::ManagerExt;
 
+mod voice;
+
 // The main window starts hidden and the frontend shows it after restoring its position.
 // Safety net: if that never happens (e.g. the frontend failed to load), show it anyway.
 const SHOW_FALLBACK: Duration = Duration::from_secs(6);
@@ -464,6 +466,7 @@ pub fn run() {
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_store::Builder::new().build())
         .plugin(tauri_plugin_autostart::Builder::new().app_name("FORBY").build())
+        .manage(voice::Voice::default())
         .setup(|app| {
             let labels = create_tray(app.handle())?;
             app.manage(labels);
@@ -494,7 +497,9 @@ pub fn run() {
             flash_taskbar,
             show_toast,
             set_autostart,
-            set_tray_labels
+            set_tray_labels,
+            voice::voice_start,
+            voice::voice_stop
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

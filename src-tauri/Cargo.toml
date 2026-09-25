@@ -26,6 +26,9 @@ tauri-plugin-store = "2"
 tauri-plugin-autostart = "2"
 tauri-plugin-log = "2"
 log = "0.4"
+cpal = "0.18.2"
+rubato = "5.0.0"
+earshot = "1.2.2"
 
 [target.'cfg(windows)'.dependencies]
 tauri-winrt-notification = "0.7"

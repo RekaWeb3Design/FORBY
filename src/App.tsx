@@ -29,10 +29,12 @@ import {useFoby, type OnTimerEvent} from "./useFoby";
 import {useSettings, useSettingsToggle, useWindowEvent} from "./useSettings";
 import "./App.css";
 
-// Dev only: type a command in the DevTools console, e.g. forby("timer 5 minutes")
+// Dev only: type a command in the DevTools console, e.g. forby("timer 5 minutes");
+// forbyVoice.start() / .stop() listen to the microphone and log the voice-segment / voice-error events
 declare global {
   interface Window {
     forby?: (text: string) => string;
+    forbyVoice?: {start: () => Promise<void>; stop: () => Promise<void>};
   }
 }
 
@@ -105,8 +107,14 @@ function App({initialSettings, initialDurationMin}: AppProps) {
       console.log(reply);
       return reply;
     };
+    const call = (cmd: string) => invoke<void>(cmd).catch((err: unknown) => console.error(cmd, err));
+    window.forbyVoice = {start: () => call("voice_start"), stop: () => call("voice_stop")};
+    const unlisteners = ["voice-segment", "voice-error"].map((name) =>
+      getCurrentWindow().listen(name, (e) => console.log(name, e.payload)));
     return () => {
       delete window.forby;
+      delete window.forbyVoice;
+      unlisteners.forEach((p) => void p.then((un) => un()));
     };
   }, [settings.lang, getState, runIntent]);
 
