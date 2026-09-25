@@ -30,11 +30,17 @@ import {useSettings, useSettingsToggle, useWindowEvent} from "./useSettings";
 import "./App.css";
 
 // Dev only: type a command in the DevTools console, e.g. forby("timer 5 minutes");
-// forbyVoice.start() / .stop() listen to the microphone and log the voice-segment / voice-error events
+// forbyVoice.start() / .stop() listen to the microphone and log the voice-segment / voice-error events;
+// forbyModels.status() / .download("base-q5_1") / .cancel("base-q5_1") manage the Whisper models and log model-* events
 declare global {
   interface Window {
     forby?: (text: string) => string;
     forbyVoice?: {start: () => Promise<void>; stop: () => Promise<void>};
+    forbyModels?: {
+      status: () => Promise<unknown>;
+      download: (name: string) => Promise<unknown>;
+      cancel: (name: string) => Promise<unknown>;
+    };
   }
 }
 
@@ -107,13 +113,29 @@ function App({initialSettings, initialDurationMin}: AppProps) {
       console.log(reply);
       return reply;
     };
-    const call = (cmd: string) => invoke<void>(cmd).catch((err: unknown) => console.error(cmd, err));
+    const call = <T,>(cmd: string, args?: Record<string, unknown>) =>
+      invoke<T>(cmd, args).catch((err: unknown) => console.error(cmd, err));
     window.forbyVoice = {start: () => call("voice_start"), stop: () => call("voice_stop")};
-    const unlisteners = ["voice-segment", "voice-error"].map((name) =>
+    window.forbyModels = {
+      status: () => call("model_status").then((s) => (console.table(s), s)),
+      download: (name) => call("model_download", {name}),
+      cancel: (name) => call("model_cancel", {name}),
+    };
+    const unlisteners = ["voice-segment", "voice-error", "model-done", "model-error"].map((name) =>
       getCurrentWindow().listen(name, (e) => console.log(name, e.payload)));
+    // Progress in 5% steps per model
+    const lastStep = new Map<string, number>();
+    unlisteners.push(getCurrentWindow().listen<{name: string; bytes: number; total: number}>("model-progress", (e) => {
+      const {name, bytes, total} = e.payload;
+      const step = Math.floor((bytes / total) * 20);
+      if (step === lastStep.get(name)) return;
+      lastStep.set(name, step);
+      console.log("model-progress", name, `${step * 5}%`, `${(bytes / 2 ** 20).toFixed(1)} / ${(total / 2 ** 20).toFixed(1)} MiB`);
+    }));
     return () => {
       delete window.forby;
       delete window.forbyVoice;
+      delete window.forbyModels;
       unlisteners.forEach((p) => void p.then((un) => un()));
     };
   }, [settings.lang, getState, runIntent]);

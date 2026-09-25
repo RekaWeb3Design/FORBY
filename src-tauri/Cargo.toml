@@ -29,6 +29,8 @@ log = "0.4"
 cpal = "0.18.2"
 rubato = "5.0.0"
 earshot = "1.2.2"
+ureq = { version = "3.4.2", default-features = false, features = ["rustls"] }
+sha2 = "0.10.9"
 
 [target.'cfg(windows)'.dependencies]
 tauri-winrt-notification = "0.7"

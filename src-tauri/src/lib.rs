@@ -7,6 +7,7 @@ use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent}
 use tauri::{AppHandle, Emitter, Manager, State, WebviewUrl, WebviewWindow, WebviewWindowBuilder, WindowEvent};
 use tauri_plugin_autostart::ManagerExt;
 
+mod models;
 mod voice;
 
 // The main window starts hidden and the frontend shows it after restoring its position.
@@ -467,7 +468,9 @@ pub fn run() {
         .plugin(tauri_plugin_store::Builder::new().build())
         .plugin(tauri_plugin_autostart::Builder::new().app_name("FORBY").build())
         .manage(voice::Voice::default())
+        .manage(models::Models::default())
         .setup(|app| {
+            models::remove_partial_downloads(app.handle());
             let labels = create_tray(app.handle())?;
             app.manage(labels);
             let handle = app.handle().clone();
@@ -499,7 +502,10 @@ pub fn run() {
             set_autostart,
             set_tray_labels,
             voice::voice_start,
-            voice::voice_stop
+            voice::voice_stop,
+            models::model_status,
+            models::model_download,
+            models::model_cancel
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
