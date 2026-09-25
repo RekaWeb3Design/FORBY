@@ -29,11 +29,18 @@ export const getCommands = (): readonly Command[] => commands;
 export const normalize = (text: string): string =>
   text.toLowerCase().replace(/[.!?,]+(?=\s|$)/g, "").replace(/\s+/g, " ").trim();
 
-// First match wins: commands in registration order, languages in LANGS order
-export const resolve = (text: string): Resolved | null => {
+// preferLang first, then the rest in LANGS order; without it, plain LANGS order
+const langOrder = (preferLang?: Lang): Lang[] => {
+  const ids = LANGS.map((l) => l.id);
+  return preferLang ? [preferLang, ...ids.filter((id) => id !== preferLang)] : ids;
+};
+
+// First match wins: commands in registration order, languages in langOrder
+export const resolve = (text: string, preferLang?: Lang): Resolved | null => {
   const input = normalize(text);
+  const langs = langOrder(preferLang);
   for (const command of commands) {
-    for (const {id: lang} of LANGS) {
+    for (const lang of langs) {
       for (const re of command.patterns[lang]) {
         const match = input.match(re);
         if (!match) continue;
@@ -51,8 +58,9 @@ export const resolve = (text: string): Resolved | null => {
 export const runCommand = (
   text: string,
   deps: {getState: () => FobyState; runIntent: (intent: Intent) => boolean},
+  preferLang?: Lang,
 ): CommandResult | null => {
-  const found = resolve(text);
+  const found = resolve(text, preferLang);
   if (!found) return null;
   return found.command.execute(found.params, {lang: found.lang, ...deps});
 };

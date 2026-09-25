@@ -3,6 +3,7 @@ import ReactDOM from "react-dom/client";
 import {getVersion} from "@tauri-apps/api/app";
 import {availableMonitors, getCurrentWindow, PhysicalPosition, primaryMonitor} from "@tauri-apps/api/window";
 import {containsPoint, workAreaOf} from "./bounds";
+import {registerBuiltinCommands} from "./builtinCommands";
 import {CONTENT_BOTTOM, CONTENT_RIGHT, DEFAULT_MARGIN, ORB_CX, ORB_CY} from "./layout";
 import {logError, logInfo} from "./log";
 import {DEFAULT_DURATION_MIN, DEFAULT_SETTINGS} from "./prefs";
@@ -87,4 +88,9 @@ const bootSettings = async () => {
 
 // Each window imports only its own component (and stylesheet)
 if (new URLSearchParams(window.location.search).get("window") === "settings") void bootSettings();
-else void bootMain();
+else {
+  // Deliberately here at module level, once per page load. In a component file HMR would run it again
+  // (and StrictMode runs effects twice), and the duplicate ids would throw.
+  registerBuiltinCommands();
+  void bootMain();
+}

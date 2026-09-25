@@ -112,6 +112,35 @@ const en = {
   errMic: "No access to the microphone",
   errFileType: (exts: string) => `Unsupported file type (${exts})`,
   errDelete: "Deleting failed",
+
+  // Text and voice commands: replies (short spoken sentences, read out by TTS later)
+  cmdTimerStarted: (min: number) => `Timer set for ${min} ${min === 1 ? "minute" : "minutes"}.`,
+  cmdPomodoroStarted: (focus: number, pause: number) => `Pomodoro started. ${focus} minutes of focus, ${pause} ${pause === 1 ? "minute" : "minutes"} of break.`,
+  cmdStopwatchStarted: "Stopwatch started.",
+  cmdPaused: "Paused.",
+  cmdResumed: "Resumed.",
+  cmdFinished: "Finished.",
+  cmdDismissed: "Dismissed.",
+  cmdBusy: "Something is already running. Finish it first.",
+  cmdDismissFirst: "Dismiss this one first.",
+  cmdCantPause: "Nothing is running.",
+  cmdCantResume: "Nothing is paused.",
+  cmdCantFinish: "There's nothing to finish.",
+  cmdCantDismiss: "There's nothing to dismiss.",
+  cmdBadMinutes: (min: number, max: number) => `The timer can be ${min} to ${max} minutes.`,
+  cmdBadFocus: (min: number, max: number) => `Focus can be ${min} to ${max} minutes.`,
+  cmdBadBreak: (min: number, max: number) => `The break can be ${min} to ${max} minutes.`,
+  cmdNotUnderstood: "Sorry, I didn't get that.",
+  cmdDuration: (min: number, sec: number) =>
+    [min > 0 && `${min} ${min === 1 ? "minute" : "minutes"}`, (sec > 0 || min === 0) && `${sec} ${sec === 1 ? "second" : "seconds"}`]
+      .filter(Boolean).join(" and "),
+  cmdLeft: (time: string) => `${time} left.`,
+  cmdFocusLeft: (time: string) => `${time} of focus left.`,
+  cmdBreakLeft: (time: string) => `${time} of break left.`,
+  cmdElapsed: (time: string) => `${time} so far.`,
+  cmdIsPaused: "It's paused.",
+  cmdTimeUp: "Time's up.",
+  cmdNoSession: "Nothing is running right now.",
 };
 
 export type Strings = typeof en;
@@ -216,6 +245,32 @@ const hu: Strings = {
   errMic: "Nincs hozzáférés a mikrofonhoz",
   errFileType: (exts) => `Nem támogatott fájltípus (${exts})`,
   errDelete: "A törlés nem sikerült",
+
+  cmdTimerStarted: (min) => `Időzítő beállítva ${min} percre.`,
+  cmdPomodoroStarted: (focus, pause) => `Indul a pomodoro. ${focus} perc fókusz, ${pause} perc szünet.`,
+  cmdStopwatchStarted: "Indul a stopper.",
+  cmdPaused: "Megállítottam.",
+  cmdResumed: "Folytatom.",
+  cmdFinished: "Befejezve.",
+  cmdDismissed: "Lezárva.",
+  cmdBusy: "Már fut valami. Előbb fejezd be.",
+  cmdDismissFirst: "Előbb zárd le ezt.",
+  cmdCantPause: "Most nem fut semmi.",
+  cmdCantResume: "Most nincs semmi megállítva.",
+  cmdCantFinish: "Nincs mit befejezni.",
+  cmdCantDismiss: "Nincs mit lezárni.",
+  cmdBadMinutes: (min, max) => `Az időzítő ${min} és ${max} perc között lehet.`,
+  cmdBadFocus: (min, max) => `A fókusz ${min} és ${max} perc között lehet.`,
+  cmdBadBreak: (min, max) => `A szünet ${min} és ${max} perc között lehet.`,
+  cmdNotUnderstood: "Ezt nem értettem.",
+  cmdDuration: (min, sec) => [min > 0 && `${min} perc`, (sec > 0 || min === 0) && `${sec} másodperc`].filter(Boolean).join(" és "),
+  cmdLeft: (time) => `Még ${time} van hátra.`,
+  cmdFocusLeft: (time) => `A fókuszból még ${time} van hátra.`,
+  cmdBreakLeft: (time) => `A szünetből még ${time} van hátra.`,
+  cmdElapsed: (time) => `Eddig ${time} telt el.`,
+  cmdIsPaused: "Most szünetel.",
+  cmdTimeUp: "Lejárt az idő.",
+  cmdNoSession: "Most nem fut semmi.",
 };
 
 export const strings: Record<Lang, Strings> = {en, hu};
