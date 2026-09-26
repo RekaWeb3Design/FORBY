@@ -31,11 +31,17 @@ import "./App.css";
 
 // Dev only: type a command in the DevTools console, e.g. forby("timer 5 minutes");
 // forbyVoice.start() / .stop() listen to the microphone and log the voice-segment / voice-error events;
+// forbyVoice.list() shows the debug WAVs, forbyVoice.transcribe("segment-….wav", "base-q5_1", "hu") runs Whisper on one;
 // forbyModels.status() / .download("base-q5_1") / .cancel("base-q5_1") manage the Whisper models and log model-* events
 declare global {
   interface Window {
     forby?: (text: string) => string;
-    forbyVoice?: {start: () => Promise<void>; stop: () => Promise<void>};
+    forbyVoice?: {
+      start: () => Promise<void>;
+      stop: () => Promise<void>;
+      list: () => Promise<unknown>;
+      transcribe: (fileName: string, model: string, lang: string) => Promise<unknown>;
+    };
     forbyModels?: {
       status: () => Promise<unknown>;
       download: (name: string) => Promise<unknown>;
@@ -115,7 +121,13 @@ function App({initialSettings, initialDurationMin}: AppProps) {
     };
     const call = <T,>(cmd: string, args?: Record<string, unknown>) =>
       invoke<T>(cmd, args).catch((err: unknown) => console.error(cmd, err));
-    window.forbyVoice = {start: () => call("voice_start"), stop: () => call("voice_stop")};
+    window.forbyVoice = {
+      start: () => call("voice_start"),
+      stop: () => call("voice_stop"),
+      list: () => call("voice_list_debug").then((w) => (console.table(w), w)),
+      transcribe: (fileName, model, lang) =>
+        call("voice_transcribe_debug", {fileName, model, lang}).then((t) => (console.log(t), t)),
+    };
     window.forbyModels = {
       status: () => call("model_status").then((s) => (console.table(s), s)),
       download: (name) => call("model_download", {name}),

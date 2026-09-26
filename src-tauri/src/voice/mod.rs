@@ -1,10 +1,14 @@
-// Voice input, step 1: the default microphone on a worker thread, resampled to 16 kHz mono and cut into speech
-// segments by a VAD. No transcription yet. Nothing starts on its own: the frontend calls voice_start / voice_stop.
-// Privacy: audio never reaches the log, only segment lengths (dev builds) and errors.
+// Voice input: the default microphone on a worker thread, resampled to 16 kHz mono and cut into speech segments by
+// a VAD. Transcription (transcribe.rs) is not wired to the segments yet; dev builds can run it on the debug WAVs.
+// Nothing starts on its own: the frontend calls voice_start / voice_stop.
+// Privacy: audio and transcripts never reach the log, only segment lengths / durations (dev builds) and errors.
 #[cfg(debug_assertions)]
-mod debug_wav;
+pub mod debug_wav;
 mod resample;
 mod segmenter;
+// Used only by the debug commands until the segments are wired to it
+#[cfg_attr(not(debug_assertions), allow(dead_code))]
+mod transcribe;
 
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{self, Receiver, RecvTimeoutError, SyncSender};

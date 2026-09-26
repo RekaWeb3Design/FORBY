@@ -503,6 +503,10 @@ pub fn run() {
             set_tray_labels,
             voice::voice_start,
             voice::voice_stop,
+            #[cfg(debug_assertions)]
+            voice::debug_wav::voice_list_debug,
+            #[cfg(debug_assertions)]
+            voice::debug_wav::voice_transcribe_debug,
             models::model_status,
             models::model_download,
             models::model_cancel

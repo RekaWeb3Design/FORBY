@@ -34,6 +34,11 @@
   "bundle": {
     "active": true,
     "targets": ["nsis"],
+    "externalBin": ["binaries/whisper-cli"],
+    "resources": {
+      "binaries/*.dll": "./",
+      "binaries/whisper.cpp-LICENSE.txt": "licenses/whisper.cpp-LICENSE.txt"
+    },
     "windows": {
       "nsis": {
         "installMode": "currentUser",

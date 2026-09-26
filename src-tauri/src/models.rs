@@ -134,6 +134,14 @@ fn installed(dir: &Path, model: &Model) -> bool {
     std::fs::metadata(dir.join(model.file)).is_ok_and(|m| m.is_file() && m.len() == model.bytes)
 }
 
+// The file of a model for the transcriber: None if it is not (fully) downloaded; an error for an unknown name
+#[cfg_attr(not(debug_assertions), allow(dead_code))]
+pub fn installed_path(app: &AppHandle, name: &str) -> Result<Option<PathBuf>, String> {
+    let model = find(name)?;
+    let dir = model_dir(app)?;
+    Ok(installed(&dir, model).then(|| dir.join(model.file)))
+}
+
 #[tauri::command]
 pub fn model_status(app: AppHandle, state: State<'_, Models>) -> Result<Vec<ModelStatus>, String> {
     let dir = model_dir(&app)?;

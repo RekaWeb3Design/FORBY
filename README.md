@@ -49,6 +49,7 @@ Prerequisites:
 
 ```sh
 npm install
+npm run fetch-whisper # whisper.cpp binaries (pinned, sha256-checked) into src-tauri/binaries; needed before any build
 npm run tauri dev     # development build with hot reload
 npm run tauri build   # release build; the NSIS installer lands in src-tauri/target/release/bundle/nsis/
 ```
