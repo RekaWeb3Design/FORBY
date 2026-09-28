@@ -59,6 +59,8 @@ export const registerBuiltinCommands = (): void => {
         new RegExp(`^${HU_SET} (?:egy )?(?<min>\\d+) perces (?:időzítőt|timert)$`),
         new RegExp(`^${HU_SET} (?:egy )?(?:időzítőt|timert) (?<min>\\d+) percre$`),
         /^időzítő (?<min>\d+) perc(?:re)?$/,
+        // Without a verb: "(egy) 5 perces időzítő(t)"
+        /^(?:egy )?(?<min>\d+) perces (?:időzítőt?|timert?)$/,
       ],
     },
     execute: (params, ctx) => {
@@ -107,7 +109,8 @@ export const registerBuiltinCommands = (): void => {
 
   simple("pause", [/^(?:pause|stop)$/], [/^(?:szünet|állj|állítsd meg)$/], {type: "pause"}, "cmdPaused", "cmdCantPause");
   simple("resume", [/^(?:resume|continue)$/], [/^(?:folytasd|tovább)$/], {type: "resume"}, "cmdResumed", "cmdCantResume");
-  simple("finish", [/^(?:finish|end (?:the )?timer)$/], [/^(?:fejezd be|befejezés)$/], {type: "finish"}, "cmdFinished", "cmdCantFinish");
+  // "fejesbe": how Whisper hears "fejezd be" on a real voice (only ever reached after the wake phrase)
+  simple("finish", [/^(?:finish|end (?:the )?timer)$/], [/^(?:fejezd be|fejesbe|befejezés)$/], {type: "finish"}, "cmdFinished", "cmdCantFinish");
   simple("dismiss", [/^(?:ok|okay|dismiss|got it)$/], [/^(?:ok|oké|elég|rendben)$/], {type: "dismiss"}, "cmdDismissed", "cmdCantDismiss");
 
   // Read only. Uses the state's last tick, which is what the display shows

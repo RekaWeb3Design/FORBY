@@ -56,12 +56,13 @@ export const resolve = (text: string, preferLang?: Lang): Resolved | null => {
   return null;
 };
 
-export const runCommand = (
-  text: string,
-  deps: {getState: () => FobyState; runIntent: (intent: Intent) => boolean},
-  preferLang?: Lang,
-): CommandResult | null => {
+export type CommandDeps = {getState: () => FobyState; runIntent: (intent: Intent) => boolean};
+
+// Runs an already resolved command (the voice chain also resolves by keywords); the reply is in its language
+export const executeResolved = (found: Resolved, deps: CommandDeps): CommandResult =>
+  found.command.execute(found.params, {lang: found.lang, ...deps});
+
+export const runCommand = (text: string, deps: CommandDeps, preferLang?: Lang): CommandResult | null => {
   const found = resolve(text, preferLang);
-  if (!found) return null;
-  return found.command.execute(found.params, {lang: found.lang, ...deps});
+  return found ? executeResolved(found, deps) : null;
 };

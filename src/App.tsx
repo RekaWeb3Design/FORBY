@@ -3,7 +3,7 @@ import {invoke} from "@tauri-apps/api/core";
 import {availableMonitors, getCurrentWindow, PhysicalPosition, primaryMonitor} from "@tauri-apps/api/window";
 import {workAreaOf} from "./bounds";
 import Chips from "./Chips";
-import {runCommand} from "./commands";
+import {executeResolved, runCommand} from "./commands";
 import Face from "./Face";
 import type {ChipId} from "./foby";
 import Ring from "./Ring";
@@ -143,23 +143,26 @@ function App({initialSettings, initialDurationMin}: AppProps) {
     const act = (heard: Heard, ms: number, followUp = false) => {
       const {getState, runIntent, lang} = voiceDepsRef.current;
       const found = heard.resolved;
-      const result = found ? runCommand(heard.rest, {getState, runIntent}, found.lang) : null;
+      const result = found ? executeResolved(found, {getState, runIntent}) : null;
       // Not understood: in the interface language. Only the wake phrase: no reply, the listening window opens
       const reply = result?.reply ?? (heard.outcome === "not-understood" ? strings[lang].cmdNotUnderstood : null);
       const rounds = heard.round2 === undefined ? 1 : 2;
       const tags = [found?.lang, followUp && "follow-up"].filter(Boolean).join(", ");
       logInfo(`voice: ${heard.outcome}${tags ? ` (${tags})` : ""}, ${rounds} round${rounds > 1 ? "s" : ""}, ${ms} ms`);
+      // The transcripts go to the DevTools console only (this whole hook exists in dev builds only), never to the log
       const out = {
         outcome: heard.outcome,
         lang: found?.lang ?? null,
         command: found ? {id: found.command.id, params: found.params} : null,
         reply,
         ms,
+        round1: heard.round1,
+        ...(heard.round2 !== undefined ? {round2: heard.round2} : {}),
         ...(followUp ? {followUp} : {}),
       };
       console.log(out);
       if (heard.outcome === "wake-only") console.log("listening for 5 s without the wake phrase");
-      return {...out, round1: heard.round1, round2: heard.round2, wake: heard.wake};
+      return {...out, wake: heard.wake};
     };
 
     // Live mode: the voice-segment listener and the loop, while forbyVoice.start() is on

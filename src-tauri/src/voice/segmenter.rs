@@ -20,8 +20,9 @@ const KEEP_SCORE: f32 = 0.5;
 const START_FRAMES: usize = 2;
 // Audio kept from before the segment opened, so the first syllable is not lost
 const PRE_ROLL: usize = ms_to_samples(500);
-// Silence that closes a segment; shorter pauses (e.g. between "hey Forby" and the command) stay inside
-const END_SILENCE: usize = ms_to_samples(600);
+// Silence that closes a segment; shorter pauses (e.g. between "hey Forby" and the command) stay inside.
+// 600 ms split a real "Hey Forby, pause." in two, and the short "pause" alone was then dropped by MIN_SPEECH.
+const END_SILENCE: usize = ms_to_samples(900);
 // Silence kept after the last speech frame
 const POST_ROLL: usize = ms_to_samples(200);
 // Segments with less speech than this (first to last speech frame) are dropped
@@ -227,6 +228,23 @@ mod tests {
     #[test]
     fn short_pause_stays_in_one_segment() {
         let out = run(LoudnessVad, &[silence(1000), tone(800), silence(300), tone(800), silence(1000)]);
+        assert_eq!(out.len(), 1);
+    }
+
+    // "Hey Forby," a comma pause, then a short command ("pause"): one segment that keeps the command, which alone
+    // would be under MIN_SPEECH
+    #[test]
+    fn wake_pause_and_short_command_stay_together() {
+        let out = run(LoudnessVad, &[silence(1000), tone(700), silence(750), tone(400), silence(1500)]);
+        assert_eq!(out.len(), 1);
+        // 500 pre-roll + 700 + 750 + 400 + 200 post-roll, give or take a frame
+        let ms = out[0].ms();
+        assert!((2530..=2580).contains(&ms), "{ms} ms");
+    }
+
+    #[test]
+    fn pause_just_under_end_silence_stays_inside() {
+        let out = run(LoudnessVad, &[silence(1000), tone(800), silence(850), tone(800), silence(1500)]);
         assert_eq!(out.len(), 1);
     }
 

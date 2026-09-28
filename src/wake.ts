@@ -19,6 +19,17 @@ export type Wake = {matched: boolean; rest: string};
 
 const fold = (word: string) => word.toLowerCase().normalize("NFD").replace(/\p{M}/gu, "");
 
+// The text up to a repeated wake phrase: Whisper sometimes writes the whole utterance twice
+// ("fejezd be! Szia Forby, fejezd be!" -> "fejezd be")
+export const cutAtRepeatedWake = (text: string): string => {
+  for (const word of text.matchAll(/[\p{L}\p{N}]+/gu)) {
+    if (word.index > 0 && matchWake(text.slice(word.index)).matched) {
+      return text.slice(0, word.index).replace(/[\s\p{P}]+$/u, "");
+    }
+  }
+  return text;
+};
+
 // rest is the original text after the wake phrase, without the punctuation right after it; empty when only the wake
 // phrase was said. Without a match, rest is the whole text.
 export const matchWake = (text: string): Wake => {

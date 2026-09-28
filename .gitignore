@@ -23,3 +23,6 @@ dist-ssr
 *.sln
 *.sw?
 .playwright-mcp/
+
+# Voice regression recordings and their manifest (a real person's voice): never commit anything from here
+/src-tauri/testdata/

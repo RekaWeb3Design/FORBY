@@ -11,7 +11,8 @@ use super::wav::wav_bytes;
 use crate::{models, LOG_TARGET};
 
 const DIR: &str = "voice-debug";
-const KEEP: usize = 20;
+// Enough to find the failed attempts of a live test afterwards
+const KEEP: usize = 100;
 const MAX_NAME: usize = 64;
 
 #[derive(Serialize)]
@@ -155,7 +156,7 @@ mod tests {
     #[test]
     fn keeps_only_the_newest_files() {
         let dir = std::env::temp_dir().join(format!("forby-voice-debug-test-{}", std::process::id()));
-        for i in 0..25 {
+        for i in 0..KEEP + 5 {
             std::fs::create_dir_all(dir.join(DIR)).unwrap();
             std::fs::write(dir.join(DIR).join(format!("segment-{i:015}.wav")), b"x").unwrap();
         }
