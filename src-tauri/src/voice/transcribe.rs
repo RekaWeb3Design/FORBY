@@ -97,11 +97,19 @@ pub struct WhisperCli {
     model: PathBuf,
     threads: usize,
     timeout: Duration,
+    // -nf: no temperature fallback. Much faster on speech the model cannot follow (it stops re-decoding),
+    // at the price of a rougher text there. Set per round by the caller.
+    no_fallback: bool,
 }
 
 impl WhisperCli {
     pub fn new(exe: PathBuf, model: PathBuf) -> Self {
-        Self { exe, model, threads: default_threads(), timeout: TIMEOUT }
+        Self { exe, model, threads: default_threads(), timeout: TIMEOUT, no_fallback: false }
+    }
+
+    pub fn no_fallback(mut self, on: bool) -> Self {
+        self.no_fallback = on;
+        self
     }
 
     // Where Tauri puts the sidecar: next to the running executable (target/debug in dev, the install folder in a
@@ -127,6 +135,9 @@ impl WhisperCli {
         // No timestamps. Not -np: it would also hide the "auto-detected language" log line. Logs go to stderr, so
         // stdout still holds only the transcript.
         args.push("-nt".into());
+        if self.no_fallback {
+            args.push("-nf".into());
+        }
         args
     }
 }
@@ -274,9 +285,11 @@ mod tests {
 
     #[test]
     fn arguments() {
-        let cli = WhisperCli { exe: "w.exe".into(), model: "m.bin".into(), threads: 8, timeout: TIMEOUT };
+        let cli = WhisperCli { exe: "w.exe".into(), model: "m.bin".into(), threads: 8, timeout: TIMEOUT, no_fallback: false };
         let args: Vec<String> = cli.args(Path::new("a.wav"), Lang::Hu).into_iter().map(|a| a.into_string().unwrap()).collect();
         assert_eq!(args, ["-m", "m.bin", "-f", "a.wav", "-l", "hu", "--prompt", "Forby", "-ac", "512", "-t", "8", "-nt"]);
+        let cli = cli.no_fallback(true);
+        assert_eq!(cli.args(Path::new("a.wav"), Lang::En).last().unwrap(), "-nf");
         let auto = cli.args(Path::new("a.wav"), Lang::Auto);
         assert_eq!(auto[5], "auto");
     }

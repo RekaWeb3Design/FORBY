@@ -8,13 +8,18 @@ import {resolve, type Resolved} from "./commands";
 import type {Lang} from "./strings";
 import {matchWake} from "./wake";
 
-export const ROUND1_MODEL = "base-q5_1";
-export const HU_MODEL = "small-q5_1";
+// How one Whisper round runs. noFallback is whisper-cli -nf.
+export type Round = {model: string; lang: Lang | "auto"; noFallback: boolean};
+
+// -nf in round 1 only: measured on 19 recordings (2 runs), it cut the time spent on speech not meant for FORBY by
+// ~28% with no wake or command lost; in round 2 it gained nothing measurable
+export const ROUND1: Round = {model: "base-q5_1", lang: "en", noFallback: true};
+export const ROUND2: Round = {model: "small-q5_1", lang: "hu", noFallback: false};
 
 // lang: the given one, or with "auto" Whisper's code of the detected language (the chain does not use "auto")
 export type Transcript = {text: string; lang: string};
-// The same audio each time; only the model and language change
-export type Transcribe = (model: string, lang: Lang | "auto") => Promise<Transcript>;
+// The same audio each time; only the round settings change
+export type Transcribe = (round: Round) => Promise<Transcript>;
 
 // blank: nothing but silence / non-speech markers; no-wake: not addressed to FORBY; wake-only: just "Hey Forby";
 // not-understood: addressed, but no command matched in either round
@@ -35,7 +40,7 @@ export type Heard = {
 export const stripMarkers = (text: string): string => text.replace(/\[[^\]]*\]|\([^)]*\)/g, " ").replace(/\s+/g, " ").trim();
 
 export const understand = async (transcribe: Transcribe): Promise<Heard> => {
-  const round1 = stripMarkers((await transcribe(ROUND1_MODEL, "en")).text);
+  const round1 = stripMarkers((await transcribe(ROUND1)).text);
   const none = {round1, wake: false, rest: "", resolved: null};
   if (!round1) return {...none, outcome: "blank"};
   const wake = matchWake(round1);
@@ -44,7 +49,7 @@ export const understand = async (transcribe: Transcribe): Promise<Heard> => {
   if (english) return {...none, wake: true, rest: wake.rest, resolved: english, outcome: "command"};
 
   // Also after a bare "Hey Forby": as English, Whisper tends to drop a Hungarian command after the name
-  const round2 = stripMarkers((await transcribe(HU_MODEL, "hu")).text);
+  const round2 = stripMarkers((await transcribe(ROUND2)).text);
   // Round 1 already heard the wake phrase; if round 2 spells it differently, its whole text is the command
   const again = matchWake(round2);
   const rest = again.matched ? again.rest : round2;

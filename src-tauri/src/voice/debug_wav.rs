@@ -40,22 +40,30 @@ pub fn voice_list_debug(app: AppHandle) -> Result<Vec<DebugWav>, String> {
     list(&debug_dir(&app)?)
 }
 
-// One voice-debug WAV to text with the given model ("base-q5_1", ...) and language ("en" / "hu" / "auto")
+// One voice-debug WAV to text with the given model ("base-q5_1", ...) and language ("en" / "hu" / "auto");
+// noFallback (optional, default off) is whisper-cli -nf
 #[tauri::command]
-pub async fn voice_transcribe_debug(app: AppHandle, file_name: String, model: String, lang: String) -> Result<Transcript, TranscribeError> {
-    tauri::async_runtime::spawn_blocking(move || transcribe(&app, &file_name, &model, &lang))
+pub async fn voice_transcribe_debug(
+    app: AppHandle,
+    file_name: String,
+    model: String,
+    lang: String,
+    no_fallback: Option<bool>,
+) -> Result<Transcript, TranscribeError> {
+    let no_fallback = no_fallback.unwrap_or(false);
+    tauri::async_runtime::spawn_blocking(move || transcribe(&app, &file_name, &model, &lang, no_fallback))
         .await
         .map_err(|e| TranscribeError::new(ErrorKind::Failed, e.to_string()))?
 }
 
-fn transcribe(app: &AppHandle, file_name: &str, model: &str, lang: &str) -> Result<Transcript, TranscribeError> {
+fn transcribe(app: &AppHandle, file_name: &str, model: &str, lang: &str, no_fallback: bool) -> Result<Transcript, TranscribeError> {
     let invalid = |message: String| TranscribeError::new(ErrorKind::InvalidInput, message);
     let lang = Lang::parse(lang)?;
     let wav = resolve(&debug_dir(app).map_err(invalid)?, file_name).map_err(invalid)?;
     let model_path = models::installed_path(app, model)
         .map_err(invalid)?
         .ok_or_else(|| TranscribeError::new(ErrorKind::ModelMissing, format!("model {model} is not downloaded")))?;
-    let cli = WhisperCli::new(WhisperCli::sidecar_path()?, model_path);
+    let cli = WhisperCli::new(WhisperCli::sidecar_path()?, model_path).no_fallback(no_fallback);
     let started = Instant::now();
     let result = cli.transcribe(&wav, lang);
     let ms = started.elapsed().as_millis() as u64;

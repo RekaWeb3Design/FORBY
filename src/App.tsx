@@ -133,7 +133,8 @@ function App({initialSettings, initialDurationMin}: AppProps) {
       understand: async (fileName) => {
         const started = performance.now();
         try {
-          const heard = await understand((model, lang) => invoke<Transcript>("voice_transcribe_debug", {fileName, model, lang}));
+          const heard = await understand(({model, lang, noFallback}) =>
+            invoke<Transcript>("voice_transcribe_debug", {fileName, model, lang, noFallback}));
           const found = heard.resolved;
           const result = found?.command.execute(found.params, {lang: found.lang, getState, runIntent});
           const ms = Math.round(performance.now() - started);
