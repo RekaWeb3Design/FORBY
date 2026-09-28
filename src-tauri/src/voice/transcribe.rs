@@ -13,8 +13,10 @@ use serde::Serialize;
 
 pub const TIMEOUT: Duration = Duration::from_secs(15);
 const MAX_THREADS: usize = 8;
-// Biases the decoder toward the name (the benchmark heard "4 by" / "forbáj" without it)
-const PROMPT: &str = "Forby";
+// Biases the decoder toward the wake phrases. "Forby" alone left "A4B" / "A for B" / "Cia forby" on real voices;
+// "Hey Forby." alone made Whisper skip a spoken "Hey Forby" that matched it. Both greetings: every wake phrase of
+// the 20 real recordings and the TTS clips heard, no false wake on the recordings without one.
+const PROMPT: &str = "Hey Forby! Szia Forby!";
 // Encoder context (1500 = 30 s); 512 covers ~10 s, enough for a command, and is several times faster
 const AUDIO_CTX: u32 = 512;
 // How often the running process is checked against the time limit
@@ -287,7 +289,7 @@ mod tests {
     fn arguments() {
         let cli = WhisperCli { exe: "w.exe".into(), model: "m.bin".into(), threads: 8, timeout: TIMEOUT, no_fallback: false };
         let args: Vec<String> = cli.args(Path::new("a.wav"), Lang::Hu).into_iter().map(|a| a.into_string().unwrap()).collect();
-        assert_eq!(args, ["-m", "m.bin", "-f", "a.wav", "-l", "hu", "--prompt", "Forby", "-ac", "512", "-t", "8", "-nt"]);
+        assert_eq!(args, ["-m", "m.bin", "-f", "a.wav", "-l", "hu", "--prompt", "Hey Forby! Szia Forby!", "-ac", "512", "-t", "8", "-nt"]);
         let cli = cli.no_fallback(true);
         assert_eq!(cli.args(Path::new("a.wav"), Lang::En).last().unwrap(), "-nf");
         let auto = cli.args(Path::new("a.wav"), Lang::Auto);

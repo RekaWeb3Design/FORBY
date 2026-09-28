@@ -1,14 +1,16 @@
 // Voice input: the default microphone on a worker thread, resampled to 16 kHz mono and cut into speech segments by
-// a VAD. Transcription (transcribe.rs) is not wired to the segments yet; dev builds can run it on the debug WAVs.
+// a VAD. Each segment goes into an in-memory buffer (buffer.rs) under an id that the voice-segment event carries;
+// the frontend transcribes it by id (live.rs) and decides what it means. Dev builds also save the segments as WAVs.
 // Nothing starts on its own: the frontend calls voice_start / voice_stop.
-// Privacy: audio and transcripts never reach the log, only segment lengths / durations (dev builds) and errors.
+// Privacy: audio and transcripts never reach the log, only segment lengths / durations and errors.
+mod buffer;
 #[cfg(debug_assertions)]
 pub mod debug_wav;
+pub mod live;
 mod resample;
 mod segmenter;
-// Used only by the debug commands until the segments are wired to it
-#[cfg_attr(not(debug_assertions), allow(dead_code))]
 mod transcribe;
+mod wav;
 
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{self, Receiver, RecvTimeoutError, SyncSender};
@@ -71,6 +73,8 @@ impl VoiceError {
 
 #[derive(Clone, Serialize)]
 struct SegmentPayload {
+    // For voice_transcribe / voice_release
+    id: u64,
     ms: usize,
     truncated: bool,
 }
@@ -146,17 +150,19 @@ fn report(app: &AppHandle, err: &VoiceError) {
 }
 
 fn emit_segment(app: &AppHandle, segment: Segment) {
-    let payload = SegmentPayload { ms: segment.ms(), truncated: segment.truncated };
+    let (ms, truncated) = (segment.ms(), segment.truncated);
     #[cfg(debug_assertions)]
     {
-        let cut = if payload.truncated { ", truncated" } else { "" };
-        log::info!(target: LOG_TARGET, "voice: segment {} ms{cut}", payload.ms);
+        let cut = if truncated { ", truncated" } else { "" };
+        log::info!(target: LOG_TARGET, "voice: segment {ms} ms{cut}");
         if let Ok(dir) = app.path().app_data_dir() {
             if let Err(e) = debug_wav::save(&dir, &segment.samples) {
                 log::warn!(target: LOG_TARGET, "voice: saving the debug WAV failed: {e}");
             }
         }
     }
+    let id = app.state::<live::Segments>().push(segment.samples);
+    let payload = SegmentPayload { id, ms, truncated };
     if let Err(e) = app.emit_to(MAIN_LABEL, SEGMENT_EVENT, payload) {
         log::error!(target: LOG_TARGET, "voice: sending {SEGMENT_EVENT} failed: {e}");
     }

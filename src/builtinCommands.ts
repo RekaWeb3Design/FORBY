@@ -39,8 +39,9 @@ const spoken = (ms: number, up: boolean, lang: Lang) => {
   return strings[lang].cmdDuration(Math.floor(total / 60), total % 60);
 };
 
-// Hungarian "start" / "set", in both conjugations seen in speech: "indíts" / "indítsd (el)", "állíts be" / "állítsd be"
-const HU_START = "(?:indítsd el|indítsd|indíts)";
+// Hungarian "start" / "set" in the conjugations seen in speech: "indíts" / "indítsd (el)" / polite "indítsa (el)",
+// "állíts be" / "állítsd be"
+const HU_START = "(?:indítsd el|indítsd|indítsa el|indítsa|indíts)";
 const HU_SET = `(?:állítsd be|állíts be|${HU_START})`;
 
 // Call once at startup, outside React: registering twice throws on the duplicate ids
@@ -49,7 +50,8 @@ export const registerBuiltinCommands = (): void => {
     id: "timer",
     patterns: {
       en: [
-        /^set (?:a |the )?timer for (?<min>\d+) (?:minutes?|mins?)$/,
+        // "of": Whisper's hearing of "set a" on a real recording
+        /^set (?:a |the |of )?timer for (?<min>\d+) (?:minutes?|mins?)$/,
         /^timer (?:for )?(?<min>\d+) (?:minutes?|mins?)$/,
         /^(?:start|set) (?:a |the )?(?<min>\d+)[ -]minute timer$/,
       ],

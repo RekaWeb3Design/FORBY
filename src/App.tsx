@@ -27,11 +27,14 @@ import {useAlarms} from "./useAlarms";
 import {useDragFling} from "./useDragFling";
 import {useFoby, type OnTimerEvent} from "./useFoby";
 import {useSettings, useSettingsToggle, useWindowEvent} from "./useSettings";
-import {understand, type Transcript} from "./voicePipeline";
+import {createVoiceLoop, type Segment, type VoiceLoop} from "./voiceLoop";
+import {understand, type Heard, type Transcript} from "./voicePipeline";
 import "./App.css";
 
 // Dev only: type a command in the DevTools console, e.g. forby("timer 5 minutes");
-// forbyVoice.start() / .stop() listen to the microphone and log the voice-segment / voice-error events;
+// forbyVoice.start() listens to the microphone and runs every segment through the voice chain, executing the commands
+// and logging {outcome, lang, command, reply, ms}; forbyVoice.start({understand: false}) only logs the raw
+// voice-segment events; forbyVoice.stop() ends either. voice-error events are always logged.
 // forbyVoice.list() shows the debug WAVs, forbyVoice.transcribe("segment-….wav", "base-q5_1", "hu" | "en" | "auto") runs
 // Whisper on one, forbyVoice.understand("segment-….wav") runs the whole voice chain on one AND executes the command;
 // forbyModels.status() / .download("base-q5_1") / .cancel("base-q5_1") manage the Whisper models and log model-* events
@@ -39,7 +42,7 @@ declare global {
   interface Window {
     forby?: (text: string) => string;
     forbyVoice?: {
-      start: () => Promise<void>;
+      start: (options?: {understand?: boolean}) => Promise<void>;
       stop: () => Promise<void>;
       list: () => Promise<unknown>;
       transcribe: (fileName: string, model: string, lang: string) => Promise<unknown>;
@@ -102,6 +105,9 @@ function App({initialSettings, initialDurationMin}: AppProps) {
   const {activeRef, animateTo} = useDragFling(orbRef, motion, {playMode: settings.playMode, onClick: onOrbClick, onSettle});
   const alarms = useAlarms(settings, state.ui, animateTo);
   timerEventRef.current = alarms.onEvent;
+  // The voice hooks are set up once; they read the current state through this
+  const voiceDepsRef = useRef({getState, runIntent, lang: settings.lang});
+  voiceDepsRef.current = {getState, runIntent, lang: settings.lang};
   unlockRef.current = alarms.unlockAudio;
   clickedRef.current = alarms.clicked;
   const ignoreRef = useRef<boolean | null>(null);
@@ -122,11 +128,77 @@ function App({initialSettings, initialDurationMin}: AppProps) {
       console.log(reply);
       return reply;
     };
+    return () => {
+      delete window.forby;
+    };
+  }, [settings.lang, getState, runIntent]);
+
+  // Dev console hooks for voice and models, set up once (a language change must not cut off live listening)
+  useEffect(() => {
+    if (!import.meta.env.DEV) return;
     const call = <T,>(cmd: string, args?: Record<string, unknown>) =>
       invoke<T>(cmd, args).catch((err: unknown) => console.error(cmd, err));
+
+    // Runs the command of a chain result (reply in the chain's language) and logs it; no transcript goes to the log
+    const act = (heard: Heard, ms: number, followUp = false) => {
+      const {getState, runIntent, lang} = voiceDepsRef.current;
+      const found = heard.resolved;
+      const result = found ? runCommand(heard.rest, {getState, runIntent}, found.lang) : null;
+      // Not understood: in the interface language. Only the wake phrase: no reply, the listening window opens
+      const reply = result?.reply ?? (heard.outcome === "not-understood" ? strings[lang].cmdNotUnderstood : null);
+      const rounds = heard.round2 === undefined ? 1 : 2;
+      const tags = [found?.lang, followUp && "follow-up"].filter(Boolean).join(", ");
+      logInfo(`voice: ${heard.outcome}${tags ? ` (${tags})` : ""}, ${rounds} round${rounds > 1 ? "s" : ""}, ${ms} ms`);
+      const out = {
+        outcome: heard.outcome,
+        lang: found?.lang ?? null,
+        command: found ? {id: found.command.id, params: found.params} : null,
+        reply,
+        ms,
+        ...(followUp ? {followUp} : {}),
+      };
+      console.log(out);
+      if (heard.outcome === "wake-only") console.log("listening for 5 s without the wake phrase");
+      return {...out, round1: heard.round1, round2: heard.round2, wake: heard.wake};
+    };
+
+    // Live mode: the voice-segment listener and the loop, while forbyVoice.start() is on
+    let live: {loop: VoiceLoop | null; unlisten: Promise<() => void>} | null = null;
+    const stopLive = () => {
+      live?.loop?.stop();
+      void live?.unlisten.then((un) => un());
+      live = null;
+    };
+    const startLive = (understandSegments: boolean) => {
+      stopLive();
+      const loop = understandSegments
+        ? createVoiceLoop({
+            transcribe: (id, {model, lang, noFallback}) => invoke<Transcript>("voice_transcribe", {id, model, lang, noFallback}),
+            release: (id) => void invoke("voice_release", {id}).catch(() => {}),
+            now: () => performance.now(),
+            onHeard: (heard, {followUp, ms}) => void act(heard, Math.round(ms), followUp),
+            onError: (err) => logError("voice: understanding a segment failed", err),
+          })
+        : null;
+      const unlisten = getCurrentWindow().listen<Segment>("voice-segment", (e) => {
+        if (loop) loop.push(e.payload);
+        else {
+          console.log("voice-segment", e.payload);
+          void invoke("voice_release", {id: e.payload.id}).catch(() => {});
+        }
+      });
+      live = {loop, unlisten};
+    };
+
     window.forbyVoice = {
-      start: () => call("voice_start"),
-      stop: () => call("voice_stop"),
+      start: async (options) => {
+        startLive(options?.understand !== false);
+        await call("voice_start");
+      },
+      stop: async () => {
+        stopLive();
+        await call("voice_stop");
+      },
       list: () => call("voice_list_debug").then((w) => (console.table(w), w)),
       transcribe: (fileName, model, lang) =>
         call("voice_transcribe_debug", {fileName, model, lang}).then((t) => (console.log(t), t)),
@@ -135,25 +207,7 @@ function App({initialSettings, initialDurationMin}: AppProps) {
         try {
           const heard = await understand(({model, lang, noFallback}) =>
             invoke<Transcript>("voice_transcribe_debug", {fileName, model, lang, noFallback}));
-          const found = heard.resolved;
-          const result = found?.command.execute(found.params, {lang: found.lang, getState, runIntent});
-          const ms = Math.round(performance.now() - started);
-          // Not understood: in the interface language. Only the wake phrase: no reply; the listening window comes in 3c
-          const reply = result?.reply ?? (heard.outcome === "not-understood" ? strings[lang].cmdNotUnderstood : null);
-          const rounds = heard.round2 === undefined ? 1 : 2;
-          logInfo(`voice: ${heard.outcome}${found ? ` (${found.lang})` : ""}, ${rounds} round${rounds > 1 ? "s" : ""}, ${ms} ms`);
-          const out = {
-            outcome: heard.outcome,
-            lang: found?.lang ?? null,
-            round1: heard.round1,
-            round2: heard.round2,
-            wake: heard.wake,
-            command: found ? {id: found.command.id, params: found.params} : null,
-            reply,
-            ms,
-          };
-          console.log(out);
-          return out;
+          return act(heard, Math.round(performance.now() - started));
         } catch (err) {
           console.error("understand", err);
           return undefined;
@@ -165,7 +219,7 @@ function App({initialSettings, initialDurationMin}: AppProps) {
       download: (name) => call("model_download", {name}),
       cancel: (name) => call("model_cancel", {name}),
     };
-    const unlisteners = ["voice-segment", "voice-error", "model-done", "model-error"].map((name) =>
+    const unlisteners = ["voice-error", "model-done", "model-error"].map((name) =>
       getCurrentWindow().listen(name, (e) => console.log(name, e.payload)));
     // Progress in 5% steps per model
     const lastStep = new Map<string, number>();
@@ -177,12 +231,12 @@ function App({initialSettings, initialDurationMin}: AppProps) {
       console.log("model-progress", name, `${step * 5}%`, `${(bytes / 2 ** 20).toFixed(1)} / ${(total / 2 ** 20).toFixed(1)} MiB`);
     }));
     return () => {
-      delete window.forby;
+      stopLive();
       delete window.forbyVoice;
       delete window.forbyModels;
       unlisteners.forEach((p) => void p.then((un) => un()));
     };
-  }, [settings.lang, getState, runIntent]);
+  }, []);
 
   // Start with Windows: the registry entry follows the setting (the Rust side skips it in dev)
   useEffect(() => {

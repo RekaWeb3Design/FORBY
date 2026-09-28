@@ -468,9 +468,11 @@ pub fn run() {
         .plugin(tauri_plugin_store::Builder::new().build())
         .plugin(tauri_plugin_autostart::Builder::new().app_name("FORBY").build())
         .manage(voice::Voice::default())
+        .manage(voice::live::Segments::default())
         .manage(models::Models::default())
         .setup(|app| {
             models::remove_partial_downloads(app.handle());
+            voice::live::clear_tmp(app.handle());
             let labels = create_tray(app.handle())?;
             app.manage(labels);
             let handle = app.handle().clone();
@@ -503,6 +505,8 @@ pub fn run() {
             set_tray_labels,
             voice::voice_start,
             voice::voice_stop,
+            voice::live::voice_transcribe,
+            voice::live::voice_release,
             #[cfg(debug_assertions)]
             voice::debug_wav::voice_list_debug,
             #[cfg(debug_assertions)]

@@ -135,7 +135,6 @@ fn installed(dir: &Path, model: &Model) -> bool {
 }
 
 // The file of a model for the transcriber: None if it is not (fully) downloaded; an error for an unknown name
-#[cfg_attr(not(debug_assertions), allow(dead_code))]
 pub fn installed_path(app: &AppHandle, name: &str) -> Result<Option<PathBuf>, String> {
     let model = find(name)?;
     let dir = model_dir(app)?;

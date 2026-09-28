@@ -39,14 +39,18 @@ export type Heard = {
 // Whisper's non-speech markers ("[BLANK_AUDIO]", "[MUSIC]", "(wind blowing)") removed
 export const stripMarkers = (text: string): string => text.replace(/\[[^\]]*\]|\([^)]*\)/g, " ").replace(/\s+/g, " ").trim();
 
-export const understand = async (transcribe: Transcribe): Promise<Heard> => {
+// The source of the audio is up to transcribe (a debug WAV name or a live segment id).
+// needWake: false inside the listening window after a bare "Hey Forby": the segment counts as a command without the
+// wake phrase (a repeated wake phrase is still cut off).
+export const understand = async (transcribe: Transcribe, {needWake = true} = {}): Promise<Heard> => {
   const round1 = stripMarkers((await transcribe(ROUND1)).text);
   const none = {round1, wake: false, rest: "", resolved: null};
   if (!round1) return {...none, outcome: "blank"};
   const wake = matchWake(round1);
-  if (!wake.matched) return {...none, outcome: "no-wake"};
-  const english = wake.rest ? resolve(wake.rest, "en") : null;
-  if (english) return {...none, wake: true, rest: wake.rest, resolved: english, outcome: "command"};
+  if (!wake.matched && needWake) return {...none, outcome: "no-wake"};
+  const rest1 = wake.matched ? wake.rest : round1;
+  const english = rest1 ? resolve(rest1, "en") : null;
+  if (english) return {...none, wake: wake.matched, rest: rest1, resolved: english, outcome: "command"};
 
   // Also after a bare "Hey Forby": as English, Whisper tends to drop a Hungarian command after the name
   const round2 = stripMarkers((await transcribe(ROUND2)).text);
@@ -54,7 +58,7 @@ export const understand = async (transcribe: Transcribe): Promise<Heard> => {
   const again = matchWake(round2);
   const rest = again.matched ? again.rest : round2;
   const hungarian = rest ? resolve(rest, "hu") : null;
-  // Nothing found after a bare wake phrase stays wake-only (it will open the listening window)
-  const outcome = hungarian ? "command" : wake.rest ? "not-understood" : "wake-only";
-  return {round1, round2, wake: true, rest, resolved: hungarian, outcome};
+  // Nothing found after a bare wake phrase stays wake-only (it opens the listening window)
+  const outcome = hungarian ? "command" : rest1 ? "not-understood" : "wake-only";
+  return {round1, round2, wake: wake.matched, rest, resolved: hungarian, outcome};
 };
