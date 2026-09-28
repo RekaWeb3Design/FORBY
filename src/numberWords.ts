@@ -1,5 +1,6 @@
 // Number words to digits (1–99), English and Hungarian at once, on already normalized text.
-// Whole words only; a hyphenated word is converted only if every part is a number word or "minute(s)".
+// Whole words only; a hyphenated word is converted only if every part is a number word or "minute(s)", and a number
+// word joined to "perc..." is split off ("ötperces" -> "5 perces").
 // Known collisions: "hat" is 6 in Hungarian and a noun in English, "hét" is 7 and also "week"; no command uses either as a word.
 
 type NumberWord = {value: number; kind: "unit" | "teen" | "tens" | "prefix"; lang: "en" | "hu"};
@@ -35,6 +36,13 @@ const huCompound = (word: string): NumberWord | undefined => {
 
 const lookup = (word: string | undefined) => (word === undefined ? undefined : WORDS.get(word) ?? huCompound(word));
 
+// A number word written together with a minute word, the correct Hungarian spelling: "ötperces", "huszonötpercre"
+const minuteCompound = (word: string): string | undefined => {
+  const at = word.indexOf("perc");
+  const n = at > 0 ? lookup(word.slice(0, at)) : undefined;
+  return n && n.kind !== "prefix" ? `${n.value} ${word.slice(at)}` : undefined;
+};
+
 // Tens followed by a unit of the same language make one number ("twenty five", "harminc öt")
 const convert = (words: string[]): string[] => {
   const out: string[] = [];
@@ -42,7 +50,7 @@ const convert = (words: string[]): string[] => {
     const word = words[i];
     const n = lookup(word);
     if (!n) {
-      out.push(word);
+      out.push(minuteCompound(word) ?? word);
       continue;
     }
     const next = lookup(words[i + 1]);

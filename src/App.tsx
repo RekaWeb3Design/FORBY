@@ -18,7 +18,7 @@ import {
   SETTINGS_BTN_SIZE,
   TIME_TOP,
 } from "./layout";
-import {logError} from "./log";
+import {logError, logInfo} from "./log";
 import {createMotion} from "./motion";
 import type {Settings} from "./prefs";
 import {TRAY_FIND_EVENT, writeLastDuration, writePosition} from "./store";
@@ -27,11 +27,13 @@ import {useAlarms} from "./useAlarms";
 import {useDragFling} from "./useDragFling";
 import {useFoby, type OnTimerEvent} from "./useFoby";
 import {useSettings, useSettingsToggle, useWindowEvent} from "./useSettings";
+import {understand, type Transcript} from "./voicePipeline";
 import "./App.css";
 
 // Dev only: type a command in the DevTools console, e.g. forby("timer 5 minutes");
 // forbyVoice.start() / .stop() listen to the microphone and log the voice-segment / voice-error events;
-// forbyVoice.list() shows the debug WAVs, forbyVoice.transcribe("segment-….wav", "base-q5_1", "hu") runs Whisper on one;
+// forbyVoice.list() shows the debug WAVs, forbyVoice.transcribe("segment-….wav", "base-q5_1", "hu" | "en" | "auto") runs
+// Whisper on one, forbyVoice.understand("segment-….wav") runs the whole voice chain on one AND executes the command;
 // forbyModels.status() / .download("base-q5_1") / .cancel("base-q5_1") manage the Whisper models and log model-* events
 declare global {
   interface Window {
@@ -41,6 +43,7 @@ declare global {
       stop: () => Promise<void>;
       list: () => Promise<unknown>;
       transcribe: (fileName: string, model: string, lang: string) => Promise<unknown>;
+      understand: (fileName: string) => Promise<unknown>;
     };
     forbyModels?: {
       status: () => Promise<unknown>;
@@ -127,6 +130,34 @@ function App({initialSettings, initialDurationMin}: AppProps) {
       list: () => call("voice_list_debug").then((w) => (console.table(w), w)),
       transcribe: (fileName, model, lang) =>
         call("voice_transcribe_debug", {fileName, model, lang}).then((t) => (console.log(t), t)),
+      understand: async (fileName) => {
+        const started = performance.now();
+        try {
+          const heard = await understand((model, lang) => invoke<Transcript>("voice_transcribe_debug", {fileName, model, lang}));
+          const found = heard.resolved;
+          const result = found?.command.execute(found.params, {lang: found.lang, getState, runIntent});
+          const ms = Math.round(performance.now() - started);
+          // Not understood: in the interface language. Only the wake phrase: no reply; the listening window comes in 3c
+          const reply = result?.reply ?? (heard.outcome === "not-understood" ? strings[lang].cmdNotUnderstood : null);
+          const rounds = heard.round2 === undefined ? 1 : 2;
+          logInfo(`voice: ${heard.outcome}${found ? ` (${found.lang})` : ""}, ${rounds} round${rounds > 1 ? "s" : ""}, ${ms} ms`);
+          const out = {
+            outcome: heard.outcome,
+            lang: found?.lang ?? null,
+            round1: heard.round1,
+            round2: heard.round2,
+            wake: heard.wake,
+            command: found ? {id: found.command.id, params: found.params} : null,
+            reply,
+            ms,
+          };
+          console.log(out);
+          return out;
+        } catch (err) {
+          console.error("understand", err);
+          return undefined;
+        }
+      },
     };
     window.forbyModels = {
       status: () => call("model_status").then((s) => (console.table(s), s)),

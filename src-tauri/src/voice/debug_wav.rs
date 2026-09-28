@@ -25,6 +25,8 @@ pub struct DebugWav {
 #[derive(Serialize)]
 pub struct Transcript {
     text: String,
+    // The given language, or the detected one with "auto"
+    lang: String,
     ms: u64,
 }
 
@@ -38,7 +40,7 @@ pub fn voice_list_debug(app: AppHandle) -> Result<Vec<DebugWav>, String> {
     list(&debug_dir(&app)?)
 }
 
-// One voice-debug WAV to text with the given model ("base-q5_1", ...) and language ("en" / "hu")
+// One voice-debug WAV to text with the given model ("base-q5_1", ...) and language ("en" / "hu" / "auto")
 #[tauri::command]
 pub async fn voice_transcribe_debug(app: AppHandle, file_name: String, model: String, lang: String) -> Result<Transcript, TranscribeError> {
     tauri::async_runtime::spawn_blocking(move || transcribe(&app, &file_name, &model, &lang))
@@ -58,10 +60,10 @@ fn transcribe(app: &AppHandle, file_name: &str, model: &str, lang: &str) -> Resu
     let result = cli.transcribe(&wav, lang);
     let ms = started.elapsed().as_millis() as u64;
     match &result {
-        Ok(_) => log::info!(target: LOG_TARGET, "voice: transcribed in {ms} ms"),
+        Ok(t) => log::info!(target: LOG_TARGET, "voice: transcribed with {model} in {ms} ms ({})", t.lang),
         Err(e) => log::warn!(target: LOG_TARGET, "voice: transcription failed after {ms} ms ({:?})", e.kind),
     }
-    result.map(|text| Transcript { text, ms })
+    result.map(|t| Transcript { text: t.text, lang: t.lang, ms })
 }
 
 // A bare file name as save() makes them: letters, digits, '-', '_' and dots, ending in .wav; no path, no ".."

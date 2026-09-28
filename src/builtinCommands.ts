@@ -39,19 +39,23 @@ const spoken = (ms: number, up: boolean, lang: Lang) => {
   return strings[lang].cmdDuration(Math.floor(total / 60), total % 60);
 };
 
+// Hungarian "start" / "set", in both conjugations seen in speech: "indíts" / "indítsd (el)", "állíts be" / "állítsd be"
+const HU_START = "(?:indítsd el|indítsd|indíts)";
+const HU_SET = `(?:állítsd be|állíts be|${HU_START})`;
+
 // Call once at startup, outside React: registering twice throws on the duplicate ids
 export const registerBuiltinCommands = (): void => {
   registerCommand({
     id: "timer",
     patterns: {
       en: [
-        /^set (?:a )?timer for (?<min>\d+) (?:minutes?|mins?)$/,
+        /^set (?:a |the )?timer for (?<min>\d+) (?:minutes?|mins?)$/,
         /^timer (?:for )?(?<min>\d+) (?:minutes?|mins?)$/,
-        /^(?:start|set) (?:a )?(?<min>\d+)[ -]minute timer$/,
+        /^(?:start|set) (?:a |the )?(?<min>\d+)[ -]minute timer$/,
       ],
       hu: [
-        /^(?:állíts be|indíts) (?:egy )?(?<min>\d+) perces (?:időzítőt|timert)$/,
-        /^(?:állíts be|indíts) (?:egy )?(?:időzítőt|timert) (?<min>\d+) percre$/,
+        new RegExp(`^${HU_SET} (?:egy )?(?<min>\\d+) perces (?:időzítőt|timert)$`),
+        new RegExp(`^${HU_SET} (?:egy )?(?:időzítőt|timert) (?<min>\\d+) percre$`),
         /^időzítő (?<min>\d+) perc(?:re)?$/,
       ],
     },
@@ -71,9 +75,9 @@ export const registerBuiltinCommands = (): void => {
         /^(?:(?:start|set) )?(?:a )?pomodoro (?:with )?(?<focus>\d+) minutes? (?:work|focus)(?: time)?(?: and)? (?<break>\d+) minutes? (?:break|pause)(?: time)?$/,
       ],
       hu: [
-        /^indíts (?:egy )?pomodorót$/,
+        new RegExp(`^${HU_START} (?:egy )?pomodorót$`),
         /^pomodoro (?<focus>\d+) perc (?:munka|fókusz) (?<break>\d+) perc szünet$/,
-        /^indíts (?:egy )?pomodorót (?<focus>\d+) perc (?:munkával|fókusszal) és (?<break>\d+) perc szünettel$/,
+        new RegExp(`^${HU_START} (?:egy )?pomodorót (?<focus>\\d+) perc (?:munkával|fókusszal) és (?<break>\\d+) perc szünettel$`),
       ],
     },
     execute: (params, ctx) => {

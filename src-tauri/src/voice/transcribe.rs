@@ -1,5 +1,5 @@
 // Speech to text behind the Transcriber trait. WhisperCli runs whisper.cpp's whisper-cli (the Tauri sidecar next to
-// FORBY.exe) once per WAV file and returns only the transcript from its stdout.
+// FORBY.exe) once per WAV file: the transcript comes from its stdout, an auto-detected language from its stderr log.
 // Started from Rust with std::process, so the frontend gets no shell/execute permission.
 // Privacy: the transcript never reaches the log; callers log only durations.
 use std::ffi::OsString;
@@ -52,10 +52,12 @@ impl TranscribeError {
     }
 }
 
+// The spoken language to assume, or Auto to let Whisper detect it
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum Lang {
     En,
     Hu,
+    Auto,
 }
 
 impl Lang {
@@ -63,6 +65,7 @@ impl Lang {
         match code {
             "en" => Ok(Self::En),
             "hu" => Ok(Self::Hu),
+            "auto" => Ok(Self::Auto),
             _ => Err(TranscribeError::new(ErrorKind::InvalidInput, format!("unsupported language: {code}"))),
         }
     }
@@ -71,13 +74,22 @@ impl Lang {
         match self {
             Self::En => "en",
             Self::Hu => "hu",
+            Self::Auto => "auto",
         }
     }
 }
 
+#[derive(Clone, Debug, PartialEq, Serialize)]
+pub struct Transcription {
+    // Trimmed; empty if nothing was recognised. May be a non-speech marker such as "[BLANK_AUDIO]".
+    pub text: String,
+    // The given language, or with Lang::Auto the detected Whisper code ("en", "hu", "de", ...)
+    pub lang: String,
+}
+
 pub trait Transcriber {
-    // A 16 kHz mono WAV file to text (trimmed; empty if nothing was recognised)
-    fn transcribe(&self, wav: &Path, lang: Lang) -> Result<String, TranscribeError>;
+    // A 16 kHz mono WAV file to text
+    fn transcribe(&self, wav: &Path, lang: Lang) -> Result<Transcription, TranscribeError>;
 }
 
 pub struct WhisperCli {
@@ -112,14 +124,15 @@ impl WhisperCli {
         ] {
             args.extend([flag.into(), value.into()]);
         }
-        // No timestamps; no log lines (stdout then holds only the transcript)
-        args.extend(["-nt".into(), "-np".into()]);
+        // No timestamps. Not -np: it would also hide the "auto-detected language" log line. Logs go to stderr, so
+        // stdout still holds only the transcript.
+        args.push("-nt".into());
         args
     }
 }
 
 impl Transcriber for WhisperCli {
-    fn transcribe(&self, wav: &Path, lang: Lang) -> Result<String, TranscribeError> {
+    fn transcribe(&self, wav: &Path, lang: Lang) -> Result<Transcription, TranscribeError> {
         if !self.exe.is_file() {
             return Err(TranscribeError::new(ErrorKind::BinaryMissing, "whisper-cli not found (run npm run fetch-whisper)"));
         }
@@ -139,8 +152,22 @@ impl Transcriber for WhisperCli {
                 format!("whisper-cli exited with code {code}: {}", last_line(&output.stderr)),
             ));
         }
-        Ok(transcript(&output.stdout))
+        let lang = match lang {
+            Lang::Auto => detected_lang(&output.stderr)
+                .ok_or_else(|| TranscribeError::new(ErrorKind::Failed, "whisper-cli did not report the detected language"))?,
+            fixed => fixed.code().to_owned(),
+        };
+        Ok(Transcription { text: transcript(&output.stdout), lang })
     }
+}
+
+// From whisper.cpp's log line "whisper_full_with_state: auto-detected language: hu (p = 0.987100)"
+fn detected_lang(stderr: &[u8]) -> Option<String> {
+    const MARKER: &str = "auto-detected language: ";
+    let text = String::from_utf8_lossy(stderr);
+    let after = text.lines().find_map(|l| l.split_once(MARKER).map(|(_, rest)| rest))?;
+    let code: String = after.chars().take_while(|c| c.is_ascii_lowercase()).collect();
+    (2..=3).contains(&code.len()).then_some(code)
 }
 
 // Logical cores, at most MAX_THREADS (more threads stopped paying off in the benchmark)
@@ -249,7 +276,21 @@ mod tests {
     fn arguments() {
         let cli = WhisperCli { exe: "w.exe".into(), model: "m.bin".into(), threads: 8, timeout: TIMEOUT };
         let args: Vec<String> = cli.args(Path::new("a.wav"), Lang::Hu).into_iter().map(|a| a.into_string().unwrap()).collect();
-        assert_eq!(args, ["-m", "m.bin", "-f", "a.wav", "-l", "hu", "--prompt", "Forby", "-ac", "512", "-t", "8", "-nt", "-np"]);
+        assert_eq!(args, ["-m", "m.bin", "-f", "a.wav", "-l", "hu", "--prompt", "Forby", "-ac", "512", "-t", "8", "-nt"]);
+        let auto = cli.args(Path::new("a.wav"), Lang::Auto);
+        assert_eq!(auto[5], "auto");
+    }
+
+    #[test]
+    fn detected_language_comes_from_the_log() {
+        let log = b"read_audio_data: trying to decode with miniaudio\n\
+            whisper_full_with_state: auto-detected language: hu (p = 0.263805)\n\
+            whisper_print_timings:     load time =    92.05 ms\n";
+        assert_eq!(detected_lang(log).as_deref(), Some("hu"));
+        assert_eq!(detected_lang(b"whisper_full_with_state: auto-detected language: yue (p = 0.5)").as_deref(), Some("yue"));
+        assert_eq!(detected_lang(b"whisper_print_timings: total time = 1 ms\n"), None);
+        assert_eq!(detected_lang(b"auto-detected language: \n"), None);
+        assert_eq!(detected_lang(b""), None);
     }
 
     #[test]
@@ -262,7 +303,8 @@ mod tests {
     fn languages() {
         assert_eq!(Lang::parse("en").unwrap(), Lang::En);
         assert_eq!(Lang::parse("hu").unwrap(), Lang::Hu);
-        assert_eq!(Lang::parse("auto").unwrap_err().kind, ErrorKind::InvalidInput);
+        assert_eq!(Lang::parse("auto").unwrap(), Lang::Auto);
+        assert_eq!(Lang::parse("de").unwrap_err().kind, ErrorKind::InvalidInput);
         assert_eq!(Lang::parse("en -m x").unwrap_err().kind, ErrorKind::InvalidInput);
     }
 
@@ -304,9 +346,10 @@ mod tests {
         assert_eq!(last_line(&output.stderr), "oops");
     }
 
-    // The real whisper-cli on the benchmark TTS clips (en_timer.wav, hu_timer.wav, silence3s.wav, ...):
+    // The real whisper-cli with language detection on the benchmark TTS clips (en_timer.wav, hu_timer.wav, ...):
     // $env:FORBY_WHISPER_CLIPS = "<folder of the clips>"; cargo test voice::transcribe::tests::transcribes_clips -- --ignored --nocapture
     // Needs npm run fetch-whisper and the base-q5_1 model (or FORBY_WHISPER_MODEL = "<path of a ggml model>").
+    // Clips named en_* / hu_* must be detected as that language.
     #[test]
     #[ignore]
     fn transcribes_clips() {
@@ -321,10 +364,14 @@ mod tests {
         for name in names {
             let name = name.to_string_lossy();
             let Some(stem) = name.strip_suffix(".wav") else { continue };
-            let lang = if stem.starts_with("hu") { Lang::Hu } else { Lang::En };
             let started = Instant::now();
-            let text = cli.transcribe(&clips.join(&*name), lang).unwrap();
-            println!("{name} [{}] {} ms: {text}", lang.code(), started.elapsed().as_millis());
+            let Transcription { text, lang } = cli.transcribe(&clips.join(&*name), Lang::Auto).unwrap();
+            println!("{name} [{lang}] {} ms: {text}", started.elapsed().as_millis());
+            for prefix in ["en", "hu"] {
+                if stem.starts_with(&format!("{prefix}_")) {
+                    assert_eq!(lang, prefix, "{name}");
+                }
+            }
             match stem {
                 "en_timer" | "en_timer_david" => assert!(text.to_lowercase().contains("timer"), "{text}"),
                 // base-q5_1 tends to split "időzítőt" ("esi dözítőt"), so only the minutes are checked
